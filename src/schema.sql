@@ -252,3 +252,90 @@ CREATE TABLE IF NOT EXISTS samples (
   dropped_at TEXT,
   FOREIGN KEY (project_id) REFERENCES projects(id)
 );
+
+-- V2: grouped redacted live misses.
+CREATE TABLE IF NOT EXISTS sample_groups (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  policy_id TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  why TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (
+    state IN ('new', 'candidate', 'promoted', 'blocked', 'quarantined')
+  ),
+  sample_count INTEGER NOT NULL,
+  exemplar_sample_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (project_id, fingerprint),
+  FOREIGN KEY (project_id) REFERENCES projects(id),
+  FOREIGN KEY (exemplar_sample_id) REFERENCES samples(id)
+);
+
+-- V2: windowed runtime evidence. Rows are append-only.
+CREATE TABLE IF NOT EXISTS runtime_stats_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  policy_id TEXT,
+  model_id TEXT,
+  feature_id TEXT,
+  hashed_request_count INTEGER NOT NULL,
+  canary_request_count INTEGER NOT NULL,
+  fallback_count INTEGER NOT NULL,
+  request_count INTEGER NOT NULL,
+  pii_blocked_count INTEGER NOT NULL,
+  captured_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES projects(id)
+);
+
+-- V2: human-approved automation rules. One current row per project.
+CREATE TABLE IF NOT EXISTS live_automation (
+  project_id TEXT PRIMARY KEY,
+  automation_id TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('manual', 'guarded')),
+  auto_canary INTEGER NOT NULL,
+  auto_full INTEGER NOT NULL,
+  auto_rollback INTEGER NOT NULL,
+  allowed_models_json TEXT NOT NULL,
+  max_eval_spend_usd REAL NOT NULL,
+  min_eval_pass_rate REAL NOT NULL,
+  max_fallback_rate REAL NOT NULL,
+  max_miss_rate REAL NOT NULL,
+  min_canary_age_s INTEGER NOT NULL,
+  min_canary_requests INTEGER NOT NULL,
+  sample_flood_limit INTEGER NOT NULL,
+  expires_at TEXT,
+  kill_switch INTEGER NOT NULL,
+  frozen INTEGER NOT NULL,
+  approved_by TEXT,
+  configured_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES projects(id)
+);
+
+-- V2: one decision cycle result per run.
+CREATE TABLE IF NOT EXISTS decision_cycles (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  automation_mode TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('succeeded', 'blocked')),
+  pending_action TEXT,
+  blocked_reason TEXT,
+  decision_ids_json TEXT NOT NULL,
+  audit_ids_json TEXT NOT NULL,
+  live_traffic_changed INTEGER NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES projects(id)
+);
+
+-- V2: append-only audit events.
+CREATE TABLE IF NOT EXISTS decision_audit_events (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  cycle_id TEXT,
+  event_type TEXT NOT NULL,
+  body_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES projects(id)
+);

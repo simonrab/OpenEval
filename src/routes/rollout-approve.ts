@@ -10,8 +10,9 @@ import {
   clearCanary,
   getPolicyRow,
   getProjectLiveState,
-  promoteCanaryToLastFull,
+  promotePolicyCanaryToLastFull,
   rollbackToLastFull,
+  rollbackToPolicy,
   verifyPolicy,
   type SignedPolicy,
 } from "../policy.js";
@@ -255,9 +256,13 @@ function applyDecision(
     return true;
   }
   if (decision === "rollback" || rollout.intent === "rollback") {
-    rollbackToLastFull(db, rollout.project_id);
-    markRolloutDecision(db, rolloutId, "approved");
-    return true;
+    const target =
+      rollout.rollback_target_policy_id ?? rollout.new_policy_id ?? rollout.old_policy_id;
+    const changed = target
+      ? rollbackToPolicy(db, rollout.project_id, target)
+      : rollbackToLastFull(db, rollout.project_id);
+    markRolloutDecision(db, rolloutId, changed ? "approved" : "rejected");
+    return changed;
   }
   if (rollout.intent === "canary") {
     if (!rollout.new_policy_id) {
@@ -274,10 +279,26 @@ function applyDecision(
     markRolloutDecision(db, rolloutId, "approved");
     return true;
   }
-  promoteCanaryToLastFull(db, rollout.project_id);
-  clearCanary(db, rollout.project_id);
-  markRolloutDecision(db, rolloutId, "approved");
-  return true;
+  if (!rollout.new_policy_id) {
+    markRolloutDecision(db, rolloutId, "rejected");
+    return false;
+  }
+  const row = getPolicyRow(db, rollout.new_policy_id);
+  const doc = row ? parseSignedPolicy(row.body_json) : null;
+  if (!row || !doc || !verifyPolicy(apiKey, doc)) {
+    markRolloutDecision(db, rolloutId, "rejected");
+    return false;
+  }
+  const changed = promotePolicyCanaryToLastFull(
+    db,
+    rollout.project_id,
+    rollout.new_policy_id,
+  );
+  if (changed) {
+    clearCanary(db, rollout.project_id);
+  }
+  markRolloutDecision(db, rolloutId, changed ? "approved" : "rejected");
+  return changed;
 }
 
 export async function registerRolloutApprove(
@@ -335,16 +356,17 @@ export async function registerRolloutApprove(
       return reply.code(404).send({ error: "rollout not found" });
     }
 
-    applyDecision(db, apiKey, rolloutId, decision);
+    const applied = applyDecision(db, apiKey, rolloutId, decision);
+    const effectiveDecision = applied ? decision : "rejected";
 
     const result = {
       rollout_id: rolloutId,
-      decision,
+      decision: effectiveDecision,
       live_traffic_changed: false,
       next_action: {
         tool: null,
         args: {},
-        ask_human: decision === "rejected" ? "open approve_url" : null,
+        ask_human: effectiveDecision === "rejected" ? "open approve_url" : null,
       },
     };
 
@@ -361,7 +383,7 @@ export async function registerRolloutApprove(
       baseUrl,
       rolloutId,
       token ?? "",
-      bannerForDecision(decision, rollout.intent),
+      bannerForDecision(effectiveDecision, rollout.intent),
     );
     if (!html) {
       return reply.code(404).send({ error: "rollout not found" });

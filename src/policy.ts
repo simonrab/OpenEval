@@ -385,6 +385,29 @@ export function promoteCanaryToLastFull(
   return result.changes > 0;
 }
 
+export function promotePolicyCanaryToLastFull(
+  db: Database.Database,
+  projectId: string,
+  policyId: string,
+): boolean {
+  const result = db
+    .prepare(
+      `UPDATE project_live_state
+       SET last_full_policy_id = ?,
+           canary_policy_id = NULL,
+           canary_percent = 0,
+           draft_policy_id = CASE
+             WHEN draft_policy_id = ? THEN NULL
+             ELSE draft_policy_id
+           END
+       WHERE project_id = ?
+         AND canary_policy_id = ?
+         AND canary_percent = ?`,
+    )
+    .run(policyId, policyId, projectId, policyId, CANARY_PERCENT);
+  return result.changes > 0;
+}
+
 export function rollbackToLastFull(
   db: Database.Database,
   projectId: string,
@@ -399,6 +422,28 @@ export function rollbackToLastFull(
          AND last_full_policy_id IS NOT NULL`,
     )
     .run(projectId);
+  return result.changes > 0;
+}
+
+export function rollbackToPolicy(
+  db: Database.Database,
+  projectId: string,
+  policyId: string,
+): boolean {
+  const row = getPolicyRow(db, policyId);
+  if (!row || row.project_id !== projectId) {
+    return false;
+  }
+  const result = db
+    .prepare(
+      `UPDATE project_live_state
+       SET last_full_policy_id = ?,
+           canary_policy_id = NULL,
+           canary_percent = 0
+       WHERE project_id = ?
+         AND last_full_policy_id IS NOT NULL`,
+    )
+    .run(policyId, projectId);
   return result.changes > 0;
 }
 

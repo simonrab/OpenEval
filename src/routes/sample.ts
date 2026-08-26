@@ -172,7 +172,7 @@ export async function registerSampleScreen(
       return reply.code(400).send({ error: "program_check is not valid" });
     }
 
-    const result = promoteLiveSample(
+    const result = await promoteLiveSample(
       {
         project_id: sample.project_id,
         sample_id: sample.id,

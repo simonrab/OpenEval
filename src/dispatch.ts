@@ -3,6 +3,11 @@ import { handleCompilePolicy } from "./tools/compile_policy.js";
 import { handleGetLiveReport } from "./tools/get_live_report.js";
 import { handlePromoteLiveSample } from "./tools/promote_live_sample.js";
 import { handleProposeRollout } from "./tools/propose_rollout.js";
+import {
+  handleConfigureLiveAutomation,
+  handleGetDecisionCycleStatus,
+  handleRunLiveDecisionCycle,
+} from "./tools/live_automation.js";
 import { handleGenerateEvalSuite } from "./tools/generate_eval_suite.js";
 import { handleGetEvalReport } from "./tools/get_eval_report.js";
 import { handleGetLabelStatus } from "./tools/get_label_status.js";
@@ -54,6 +59,9 @@ handlers.set("compile_policy", handleCompilePolicy);
 handlers.set("get_live_report", handleGetLiveReport);
 handlers.set("promote_live_sample", handlePromoteLiveSample);
 handlers.set("propose_rollout", handleProposeRollout);
+handlers.set("configure_live_automation", handleConfigureLiveAutomation);
+handlers.set("run_live_decision_cycle", handleRunLiveDecisionCycle);
+handlers.set("get_decision_cycle_status", handleGetDecisionCycleStatus);
 
 function unknownToolError() {
   return agentError({

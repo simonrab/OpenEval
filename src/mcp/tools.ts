@@ -24,6 +24,9 @@ const MCP_DESCRIPTIONS: Record<ToolName, string> = {
   get_live_report: "Return live counts, last-known age, and paginated sample ids.",
   promote_live_sample: "Turn a live sample into a v0 failure.",
   propose_rollout: "Propose canary, full, or rollback. This tool does not apply.",
+  configure_live_automation: "Configure guarded live automation rules for one project.",
+  run_live_decision_cycle: "Run one guarded live decision cycle for one project.",
+  get_decision_cycle_status: "Return the last guarded decision cycle status.",
 };
 
 function toJsonSchema(name: ToolName): Record<string, unknown> {

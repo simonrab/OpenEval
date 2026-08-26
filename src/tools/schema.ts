@@ -20,6 +20,8 @@ export const MUTATING_TOOLS = [
   "compile_policy",
   "promote_live_sample",
   "propose_rollout",
+  "configure_live_automation",
+  "run_live_decision_cycle",
 ] as const satisfies readonly ToolName[];
 
 function isMutating(name: ToolName): boolean {
@@ -255,6 +257,49 @@ export const getLiveReportInputSchema = z
     project_id: z.string().min(1),
     cursor: z.string().nullable().optional(),
     limit: z.number().int().min(1).max(20).optional(),
+  })
+  .strict();
+
+const automationGuardRulesSchema = z
+  .object({
+    auto_canary: z.boolean().optional(),
+    auto_full: z.boolean().optional(),
+    auto_rollback: z.boolean().optional(),
+    allowed_models: z.array(z.string()).optional(),
+    max_eval_spend_usd: z.number().min(0).optional(),
+    min_eval_pass_rate: z.number().min(0).max(1).optional(),
+    max_fallback_rate: z.number().min(0).max(1).optional(),
+    max_miss_rate: z.number().min(0).max(1).optional(),
+    min_canary_age_s: z.number().int().min(0).optional(),
+    min_canary_requests: z.number().int().min(0).optional(),
+    sample_flood_limit: z.number().int().min(0).optional(),
+    expires_at: z.string().nullable().optional(),
+    kill_switch: z.boolean().optional(),
+    frozen: z.boolean().optional(),
+  })
+  .strict();
+
+export const configureLiveAutomationInputSchema = z
+  .object({
+    project_id: z.string().min(1),
+    mode: z.enum(["manual", "guarded"]),
+    guard_rules: automationGuardRulesSchema.optional(),
+    approved_by: z.string().min(1).nullable().optional(),
+    idempotency_key: z.string().min(1),
+  })
+  .strict();
+
+export const runLiveDecisionCycleInputSchema = z
+  .object({
+    project_id: z.string().min(1),
+    idempotency_key: z.string().min(1),
+  })
+  .strict();
+
+export const getDecisionCycleStatusInputSchema = z
+  .object({
+    project_id: z.string().min(1),
+    cycle_id: z.string().nullable().optional(),
   })
   .strict();
 
@@ -521,7 +566,45 @@ export const getLiveReportOutputSchema = z
     next_cursor: z.string().nullable(),
     truncated: z.boolean(),
     report_url: z.string(),
+    automation_mode: z.enum(["manual", "guarded"]),
+    last_cycle: z
+      .object({
+        cycle_id: z.string(),
+        status: z.enum(["succeeded", "blocked"]),
+        finished_at: z.string(),
+      })
+      .strict()
+      .nullable(),
+    pending_action: z.string().nullable(),
+    blocked_reason: z.string().nullable(),
+    decision_ids: z.array(z.string()),
+    audit_ids: z.array(z.string()),
     live_traffic_changed: z.literal(false),
+    next_action: nextActionSchema,
+  })
+  .strict();
+
+export const configureLiveAutomationOutputSchema = z
+  .object({
+    automation_id: z.string(),
+    automation_mode: z.enum(["manual", "guarded"]),
+    guard_rules: z.record(z.unknown()),
+    audit_ids: z.array(z.string()),
+    live_traffic_changed: z.literal(false),
+    next_action: nextActionSchema,
+  })
+  .strict();
+
+export const decisionCycleOutputSchema = z
+  .object({
+    cycle_id: z.string().nullable(),
+    status: z.enum(["succeeded", "blocked"]),
+    automation_mode: z.enum(["manual", "guarded"]),
+    pending_action: z.string().nullable(),
+    blocked_reason: z.string().nullable(),
+    decision_ids: z.array(z.string()),
+    audit_ids: z.array(z.string()),
+    live_traffic_changed: z.boolean(),
     next_action: nextActionSchema,
   })
   .strict();
@@ -538,6 +621,9 @@ export const toolInputSchemas: Record<ToolName, z.ZodType> = {
   get_live_report: getLiveReportInputSchema,
   promote_live_sample: promoteLiveSampleInputSchema,
   propose_rollout: proposeRolloutInputSchema,
+  configure_live_automation: configureLiveAutomationInputSchema,
+  run_live_decision_cycle: runLiveDecisionCycleInputSchema,
+  get_decision_cycle_status: getDecisionCycleStatusInputSchema,
 };
 
 export type ParseToolInputResult =

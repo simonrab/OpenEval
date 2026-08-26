@@ -232,6 +232,21 @@ describe("propose_rollout (R5, R6)", () => {
     return { lastFullId: body1.policy_id, draftId: body2.policy_id };
   }
 
+  async function compileApprovedDraft(
+    namedModelId: string,
+    compileKey: string,
+  ): Promise<string> {
+    const next = seedRecommendation({
+      namedModelId,
+      backups: [],
+    });
+    const compiled = await compile(next.recId, next.evalSetId, compileKey);
+    assert.equal(compiled.statusCode, 200);
+    const body = compiled.json() as { policy_id: string; approve_url: string };
+    await decideCompile(body.approve_url, "approved");
+    return body.policy_id;
+  }
+
   it("propose canary returns approve_url and live_traffic_changed false; GET stays last full", async () => {
     const seeded = await seedLastFullAndDraft();
     const res = await propose({
@@ -423,6 +438,49 @@ describe("propose_rollout (R5, R6)", () => {
     assert.equal(doc.last_full?.primary.model_id, "anthropic/claude-3-haiku");
     assert.equal(doc.canary, null);
     assert.equal(doc.canary_percent, 0);
+  });
+
+  it("stale full approval cannot promote a newer canary", async () => {
+    const seeded = await seedLastFullAndDraft();
+    const firstCanary = await propose({
+      project_id: projectId,
+      intent: "canary",
+      idempotency_key: "rollout-stale-first-canary",
+    });
+    await decideRollout(
+      (firstCanary.json() as { approve_url: string }).approve_url,
+      "approved",
+    );
+    const staleFull = await propose({
+      project_id: projectId,
+      intent: "full",
+      idempotency_key: "rollout-stale-full",
+    });
+    const staleFullUrl = (staleFull.json() as { approve_url: string }).approve_url;
+
+    const newerPolicyId = await compileApprovedDraft(
+      "meta/llama-3.3-70b-instruct",
+      "compile-newer-draft",
+    );
+    const newerCanary = await propose({
+      project_id: projectId,
+      intent: "canary",
+      idempotency_key: "rollout-stale-newer-canary",
+    });
+    await decideRollout(
+      (newerCanary.json() as { approve_url: string }).approve_url,
+      "approved",
+    );
+
+    const staleDecision = await decideRollout(staleFullUrl, "approved");
+    assert.equal(staleDecision.statusCode, 200);
+    assert.equal((staleDecision.json() as { decision: string }).decision, "rejected");
+
+    const get = await getPolicy();
+    const doc = get.json() as RuntimeGet;
+    assert.equal(doc.last_full?.policy_id, seeded.lastFullId);
+    assert.equal(doc.canary?.policy_id, newerPolicyId);
+    assert.equal(doc.canary_percent, 5);
   });
 
   it("rollback approve restores last full, does not run evals", async () => {

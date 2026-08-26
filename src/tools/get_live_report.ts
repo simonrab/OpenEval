@@ -4,6 +4,7 @@ import { projectExists } from "../keys.js";
 import { buildLiveReportUrl } from "../live-report-token.js";
 import { CANARY_PERCENT } from "../live/sticky.js";
 import { getProjectLiveState } from "../policy.js";
+import { buildLiveAutomationReport } from "./live_automation.js";
 import {
   countProjectSamples,
   listStoredSamples,
@@ -117,6 +118,7 @@ export function buildLiveReport(
     next_cursor: hasMore ? encodeCursor(nextOffset) : null,
     truncated: hasMore,
     report_url: buildLiveReportUrl(baseUrl, apiKey, input.project_id),
+    ...buildLiveAutomationReport(db, input.project_id),
     live_traffic_changed: false,
     next_action: {
       tool: nextTool,

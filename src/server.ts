@@ -20,6 +20,7 @@ import { registerLiveReport } from "./routes/live-report.js";
 import { registerRuntimePolicies } from "./routes/runtime-policies.js";
 import { registerRuntimeSamples } from "./routes/runtime-samples.js";
 import { registerRuntimeStats } from "./routes/runtime-stats.js";
+import { registerProxyRoutes } from "./routes/proxy.js";
 import { registerTools } from "./routes/tools.js";
 import {
   createOpenRouterClient,
@@ -90,6 +91,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     await registerRuntimePolicies(v1, db, opts.apiKey);
     await registerRuntimeSamples(v1, db);
     await registerRuntimeStats(v1, db);
+    await registerProxyRoutes(v1, db, opts.apiKey, openRouter);
     await registerTools(v1, db, { baseUrl, apiKey: opts.apiKey, openRouter });
   }, { prefix: "/v1" });
 

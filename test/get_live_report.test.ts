@@ -77,6 +77,7 @@ describe("get_live_report (L7)", () => {
   let dir: string;
   let sqlitePath: string;
   let projectId: string;
+  let livePolicyId: string | null;
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "evalrouter-live-report-"));
@@ -98,6 +99,7 @@ describe("get_live_report (L7)", () => {
     });
     assert.equal(proj.statusCode, 200);
     projectId = (proj.json() as { project_id: string }).project_id;
+    livePolicyId = null;
   });
 
   afterEach(async () => {
@@ -111,6 +113,7 @@ describe("get_live_report (L7)", () => {
       const signed = putPolicy(db, apiKey, sampleUnsigned(projectId, extra));
       const ok = promoteToLastFullIfNone(db, apiKey, projectId, signed.policy_id);
       assert.equal(ok, true);
+      livePolicyId = signed.policy_id;
       return signed.policy_id;
     } finally {
       db.close();
@@ -154,7 +157,7 @@ describe("get_live_report (L7)", () => {
       payload: {
         sample_id: extra?.sample_id ?? newSampleId(),
         project_id: projectId,
-        policy_id: extra?.policy_id ?? "pol_live_report",
+        policy_id: extra?.policy_id ?? livePolicyId ?? "pol_live_report",
         model_id: "openai/gpt-4.1-nano",
         why: extra?.why ?? "vendor_error",
         input_redacted: extra?.input_redacted ?? "Name the total.",

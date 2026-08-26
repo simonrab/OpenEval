@@ -4,6 +4,8 @@ import { z } from "zod";
 import { agentError, piiBlockedError, projectNotFoundError } from "../errors.js";
 import { newSampleId } from "../ids.js";
 import { projectExists } from "../keys.js";
+import { getPolicyRow } from "../policy.js";
+import { upsertSampleGroup } from "../samples.js";
 import { ErrorCode } from "../tools/types.js";
 import { redactSampleFields, SAMPLE_WHY } from "../live/redact.js";
 
@@ -31,6 +33,17 @@ function invalidSampleBody() {
   });
 }
 
+function invalidSamplePolicy() {
+  return agentError({
+    code: ErrorCode.INVALID_INPUT,
+    message: "The policy_id is not valid for this project.",
+    retryable: false,
+    suggested_tool: null,
+    suggested_args: {},
+    next_action: { tool: null, args: {}, ask_human: null },
+  });
+}
+
 export async function registerRuntimeSamples(
   app: FastifyInstance,
   db: Database.Database,
@@ -44,6 +57,11 @@ export async function registerRuntimeSamples(
     const body = parsed.data;
     if (!projectExists(db, body.project_id)) {
       return reply.code(404).send(projectNotFoundError(body.project_id));
+    }
+
+    const policy = getPolicyRow(db, body.policy_id);
+    if (!policy || policy.project_id !== body.project_id) {
+      return reply.code(400).send(invalidSamplePolicy());
     }
 
     const redacted = redactSampleFields(body.input_redacted, body.output_redacted);
@@ -69,6 +87,15 @@ export async function registerRuntimeSamples(
       body.captured_at,
       createdAt,
     );
+    upsertSampleGroup(db, {
+      id: sampleId,
+      project_id: body.project_id,
+      policy_id: body.policy_id,
+      model_id: body.model_id,
+      why: body.why,
+      input_redacted: redacted.input_redacted,
+      output_redacted: redacted.output_redacted,
+    });
 
     return { sample_id: sampleId };
   });

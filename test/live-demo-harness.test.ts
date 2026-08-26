@@ -433,9 +433,12 @@ describe("Live demo harness (L8)", () => {
       () => hop.calls.some((c) => c.method === "POST" && c.url.includes("/v1/runtime/samples")),
       "sample upload",
     );
-    const samplePost = hop.calls.find(
-      (c) => c.method === "POST" && c.url.includes("/v1/runtime/samples"),
-    );
+    const samplePost = hop.calls.find((c) => {
+      if (c.method !== "POST" || !c.url.includes("/v1/runtime/samples") || !c.body) {
+        return false;
+      }
+      return (JSON.parse(c.body) as { why?: string }).why === "app_reported";
+    });
     assert.ok(samplePost?.body);
     const sampleBody = JSON.parse(samplePost.body) as {
       sample_id: string;

@@ -12,6 +12,9 @@ export const TOOL_NAMES = [
   "get_live_report",
   "promote_live_sample",
   "propose_rollout",
+  "configure_live_automation",
+  "run_live_decision_cycle",
+  "get_decision_cycle_status",
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];

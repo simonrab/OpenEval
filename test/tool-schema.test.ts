@@ -20,6 +20,8 @@ import {
   runEvalsOutputSchema,
   promoteLiveSampleOutputSchema,
   proposeRolloutOutputSchema,
+  configureLiveAutomationOutputSchema,
+  decisionCycleOutputSchema,
   toolInputSchemas,
 } from "../src/tools/schema.js";
 import { ErrorCode } from "../src/tools/types.js";
@@ -33,9 +35,16 @@ const mutating = [
   "compile_policy",
   "promote_live_sample",
   "propose_rollout",
+  "configure_live_automation",
+  "run_live_decision_cycle",
 ] as const;
 
-const readOnly = ["get_label_status", "get_eval_report", "get_live_report"] as const;
+const readOnly = [
+  "get_label_status",
+  "get_eval_report",
+  "get_live_report",
+  "get_decision_cycle_status",
+] as const;
 
 function validInput(name: (typeof TOOL_NAMES)[number]): Record<string, unknown> {
   switch (name) {
@@ -96,6 +105,21 @@ function validInput(name: (typeof TOOL_NAMES)[number]): Record<string, unknown> 
         intent: "canary",
         idempotency_key: "idem-1",
       };
+    case "configure_live_automation":
+      return {
+        project_id: "prj_1",
+        mode: "guarded",
+        guard_rules: { auto_canary: true },
+        approved_by: "per_admin",
+        idempotency_key: "idem-1",
+      };
+    case "run_live_decision_cycle":
+      return {
+        project_id: "prj_1",
+        idempotency_key: "idem-1",
+      };
+    case "get_decision_cycle_status":
+      return { project_id: "prj_1" };
   }
 }
 
@@ -110,7 +134,7 @@ describe("tool schemas", () => {
     "get_eval_report",
   ] as const;
 
-  it("registers the v0 seven tools, compile_policy, get_live_report, promote_live_sample, and propose_rollout", () => {
+  it("registers v0, Live v1, and V2 tools", () => {
     for (const name of v0Tools) {
       assert.ok((TOOL_NAMES as readonly string[]).includes(name));
     }
@@ -118,9 +142,21 @@ describe("tool schemas", () => {
     assert.ok((TOOL_NAMES as readonly string[]).includes("get_live_report"));
     assert.ok((TOOL_NAMES as readonly string[]).includes("promote_live_sample"));
     assert.ok((TOOL_NAMES as readonly string[]).includes("propose_rollout"));
+    assert.ok((TOOL_NAMES as readonly string[]).includes("configure_live_automation"));
+    assert.ok((TOOL_NAMES as readonly string[]).includes("run_live_decision_cycle"));
+    assert.ok((TOOL_NAMES as readonly string[]).includes("get_decision_cycle_status"));
     assert.deepEqual(
       [...TOOL_NAMES],
-      [...v0Tools, "compile_policy", "get_live_report", "promote_live_sample", "propose_rollout"],
+      [
+        ...v0Tools,
+        "compile_policy",
+        "get_live_report",
+        "promote_live_sample",
+        "propose_rollout",
+        "configure_live_automation",
+        "run_live_decision_cycle",
+        "get_decision_cycle_status",
+      ],
     );
     for (const name of TOOL_NAMES) {
       assert.ok(toolInputSchemas[name]);
@@ -449,6 +485,42 @@ describe("output schemas", () => {
             approve_url: "https://example.invalid/rollout-approve?rollout_id=rlo_1&token=signed",
           },
           ask_human: "open approve_url",
+        },
+      }).success,
+      true,
+    );
+  });
+
+  it("parses configure_live_automation and decision cycle payloads", () => {
+    assert.equal(
+      configureLiveAutomationOutputSchema.safeParse({
+        automation_id: "aut_1",
+        automation_mode: "guarded",
+        guard_rules: { auto_canary: true },
+        audit_ids: ["aud_1"],
+        live_traffic_changed: false,
+        next_action: {
+          tool: "run_live_decision_cycle",
+          args: { project_id: "prj_1" },
+          ask_human: null,
+        },
+      }).success,
+      true,
+    );
+    assert.equal(
+      decisionCycleOutputSchema.safeParse({
+        cycle_id: "cyc_1",
+        status: "blocked",
+        automation_mode: "manual",
+        pending_action: null,
+        blocked_reason: "manual_mode",
+        decision_ids: [],
+        audit_ids: ["aud_1"],
+        live_traffic_changed: false,
+        next_action: {
+          tool: "configure_live_automation",
+          args: {},
+          ask_human: null,
         },
       }).success,
       true,

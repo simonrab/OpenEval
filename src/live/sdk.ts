@@ -465,6 +465,8 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
           request_count: requestCount,
           pii_blocked_count: piiBlockedCount,
           last_known_loaded_at: lastKnownLoadedAt,
+          policy_id: lastPolicyId,
+          model_id: lastModelId,
         }),
       });
       if (!res.ok) {
@@ -672,6 +674,7 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
           throw err;
         }
         fallbackCount += 1;
+        queueFromError(input.prompt, err, cached.primary.model_id, cached.policy_id);
         try {
           const result = await completeJson(
             backup,
@@ -713,6 +716,12 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
           throw err;
         }
         fallbackCount += 1;
+        queueFromError(
+          input.prompt,
+          err,
+          cached.primary.model_id,
+          cached.policy_id,
+        );
         try {
           for await (const token of streamModel(
             backup,

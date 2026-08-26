@@ -128,6 +128,19 @@ function validInput(name: (typeof TOOL_NAMES)[number]): Record<string, unknown> 
         intent: "canary",
         idempotency_key: "idem-mcp-1",
       };
+    case "configure_live_automation":
+      return {
+        project_id: "prj_1",
+        mode: "manual",
+        idempotency_key: "idem-mcp-1",
+      };
+    case "run_live_decision_cycle":
+      return {
+        project_id: "prj_1",
+        idempotency_key: "idem-mcp-1",
+      };
+    case "get_decision_cycle_status":
+      return { project_id: "prj_1" };
   }
 }
 
@@ -158,8 +171,8 @@ async function postViaMcpClient(
 }
 
 describe("MCP tool registry", () => {
-  it("registers v0 seven tools plus four Live tools with non-empty schemas", () => {
-    assert.equal(MCP_TOOLS.length, 11);
+  it("registers v0, Live v1, and V2 tools with non-empty schemas", () => {
+    assert.equal(MCP_TOOLS.length, 14);
     const v0 = [
       "generate_eval_suite",
       "queue_for_labeling",
@@ -176,6 +189,9 @@ describe("MCP tool registry", () => {
     assert.ok(MCP_TOOLS.find((t) => t.name === "get_live_report"));
     assert.ok(MCP_TOOLS.find((t) => t.name === "promote_live_sample"));
     assert.ok(MCP_TOOLS.find((t) => t.name === "propose_rollout"));
+    assert.ok(MCP_TOOLS.find((t) => t.name === "configure_live_automation"));
+    assert.ok(MCP_TOOLS.find((t) => t.name === "run_live_decision_cycle"));
+    assert.ok(MCP_TOOLS.find((t) => t.name === "get_decision_cycle_status"));
     for (const name of TOOL_NAMES) {
       const tool = MCP_TOOLS.find((t) => t.name === name);
       assert.ok(tool, `missing MCP tool ${name}`);
@@ -376,6 +392,49 @@ describe("MCP round-trip vs HTTP", () => {
     assert.equal(mcp.status, http.status);
     assert.deepEqual(mcp.body, http.body);
     assert.equal(http.status, 200);
+  });
+
+  it("V2 automation tools match HTTP body and output", async () => {
+    const configureBody = {
+      project_id: projectId,
+      mode: "manual" as const,
+      idempotency_key: "mcp-configure-automation",
+    };
+    const configuredHttp = await postViaHttp(
+      app,
+      "configure_live_automation",
+      configureBody,
+    );
+    const configuredMcp = await postViaMcpClient(
+      app,
+      "configure_live_automation",
+      configureBody,
+    );
+    assert.equal(configuredMcp.status, configuredHttp.status);
+    assert.deepEqual(configuredMcp.body, configuredHttp.body);
+
+    const cycleBody = {
+      project_id: projectId,
+      idempotency_key: "mcp-run-cycle",
+    };
+    const cycleHttp = await postViaHttp(app, "run_live_decision_cycle", cycleBody);
+    const cycleMcp = await postViaMcpClient(app, "run_live_decision_cycle", cycleBody);
+    assert.equal(cycleMcp.status, cycleHttp.status);
+    assert.deepEqual(cycleMcp.body, cycleHttp.body);
+
+    const statusBody = { project_id: projectId };
+    const statusHttp = await postViaHttp(
+      app,
+      "get_decision_cycle_status",
+      statusBody,
+    );
+    const statusMcp = await postViaMcpClient(
+      app,
+      "get_decision_cycle_status",
+      statusBody,
+    );
+    assert.equal(statusMcp.status, statusHttp.status);
+    assert.deepEqual(statusMcp.body, statusHttp.body);
   });
 });
 

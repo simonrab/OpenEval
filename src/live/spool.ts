@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { LiveSample } from "./redact.js";
 
@@ -24,7 +24,9 @@ export async function writeSpoolSample(
     return false;
   }
   const path = join(dir, `${sample.sample_id}${SPOOL_SUFFIX}`);
-  await writeFile(path, JSON.stringify(sample), "utf8");
+  const tmpPath = `${path}.${process.pid}.tmp`;
+  await writeFile(tmpPath, JSON.stringify(sample), "utf8");
+  await rename(tmpPath, path);
   return true;
 }
 

@@ -47,3 +47,19 @@ export function newSampleId(): string {
 export function newRolloutId(): string {
   return newId("rlo_");
 }
+
+export function newAutomationId(): string {
+  return newId("aut_");
+}
+
+export function newDecisionCycleId(): string {
+  return newId("cyc_");
+}
+
+export function newAuditEventId(): string {
+  return newId("aud_");
+}
+
+export function newSampleGroupId(): string {
+  return newId("sgrp_");
+}

@@ -6,9 +6,10 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import type { FastifyInstance } from "fastify";
 import { INPUT_TRUNCATE } from "../src/eval-set.js";
 import { openDb } from "../src/db.js";
-import { newSampleId } from "../src/ids.js";
+import { newEvalSetId, newPolicyId, newRecId, newSampleId } from "../src/ids.js";
 import { createMockOpenRouter } from "../src/runner/openrouter.js";
 import { buildApp } from "../src/server.js";
+import { putPolicy } from "../src/policy.js";
 import { ErrorCode, isAgentError } from "../src/tools/types.js";
 
 const apiKey = "test-key-not-a-secret";
@@ -63,10 +64,16 @@ describe("POST /v1/runtime/samples", () => {
     projectId: string,
     extra?: Record<string, unknown>,
   ): Record<string, unknown> {
+    const policyId =
+      typeof extra?.policy_id === "string"
+        ? extra.policy_id
+        : projectId === "prj_missing"
+          ? "pol_live_sample_1"
+          : seedPolicy(projectId);
     return {
       sample_id: extra?.sample_id ?? newSampleId(),
       project_id: projectId,
-      policy_id: "pol_live_sample_1",
+      policy_id: policyId,
       model_id: "openai/gpt-4.1-nano",
       why: "vendor_error",
       input_redacted: "Name the total.",
@@ -74,6 +81,27 @@ describe("POST /v1/runtime/samples", () => {
       captured_at: "2026-08-26T15:00:00.000Z",
       ...extra,
     };
+  }
+
+  function seedPolicy(projectId: string): string {
+    const db = openDb(sqlitePath);
+    try {
+      const signed = putPolicy(db, apiKey, {
+        policy_id: newPolicyId(),
+        version: 1,
+        previous_policy_id: null,
+        project_id: projectId,
+        rec_id: newRecId(),
+        ste_id: newEvalSetId(),
+        compiled_at: "2026-08-26T12:00:00.000Z",
+        primary: { model_id: "openai/gpt-4.1-nano", timeout_ms: 2500 },
+        backups: [],
+        canary: null,
+      });
+      return signed.policy_id;
+    } finally {
+      db.close();
+    }
   }
 
   it("returns 401 when the Bearer key is missing", async () => {
@@ -106,6 +134,7 @@ describe("POST /v1/runtime/samples", () => {
     const longInput = `Prompt ${"x".repeat(600)}`;
     const longOutput = `Error ${"y".repeat(600)}`;
     const sampleId = newSampleId();
+    const policyId = seedPolicy(projectId);
     const res = await app.inject({
       method: "POST",
       url: "/v1/runtime/samples",
@@ -115,6 +144,7 @@ describe("POST /v1/runtime/samples", () => {
       },
       payload: samplePayload(projectId, {
         sample_id: sampleId,
+        policy_id: policyId,
         input_redacted: longInput,
         output_redacted: longOutput,
       }),
@@ -144,7 +174,7 @@ describe("POST /v1/runtime/samples", () => {
       };
       assert.equal(row.id, sampleId);
       assert.equal(row.project_id, projectId);
-      assert.equal(row.policy_id, "pol_live_sample_1");
+      assert.equal(row.policy_id, policyId);
       assert.equal(row.model_id, "openai/gpt-4.1-nano");
       assert.equal(row.why, "vendor_error");
       assert.equal(row.input_redacted.length <= INPUT_TRUNCATE, true);
@@ -254,5 +284,27 @@ describe("POST /v1/runtime/samples", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("rejects a policy_id from another project", async () => {
+    const projectId = await createProject();
+    const otherProjectId = await createProject();
+    const otherPolicyId = seedPolicy(otherProjectId);
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/runtime/samples",
+      headers: {
+        ...authHeaders(),
+        "content-type": "application/json",
+      },
+      payload: samplePayload(projectId, {
+        policy_id: otherPolicyId,
+      }),
+    });
+    assert.equal(res.statusCode, 400);
+    const body = res.json() as { code: string; message: string };
+    assert.equal(isAgentError(body), true);
+    assert.equal(body.code, ErrorCode.INVALID_INPUT);
+    assert.equal(body.message.includes("policy_id"), true);
   });
 });

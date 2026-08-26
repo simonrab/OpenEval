@@ -289,16 +289,18 @@ describe("Live SDK samples R3", () => {
     await completeDone;
     assert.equal(completeSettled, true);
     assert.equal(ingestFinished, false);
-    await waitUntil(() => ingestPosts.length === 1, "ingest POST started");
+    await waitUntil(() => ingestPosts.length === 2, "ingest POST started");
     assert.equal(ingestFinished, false);
     assert.equal(getCalls().length, getsAfterStart);
 
-    const sample = parseSample(ingestPosts[0].body);
-    assert.equal(sample.why, "vendor_error");
-    assert.equal(sample.policy_id, "pol_live_sdk_l4");
-    assert.equal(sample.model_id, backupModel);
-    assert.equal(sample.project_id, projectId);
-    assert.match(sample.sample_id, /^smp_/);
+    const primarySample = parseSample(ingestPosts[0].body);
+    assert.equal(primarySample.why, "vendor_error");
+    assert.equal(primarySample.policy_id, "pol_live_sdk_l4");
+    assert.equal(primarySample.model_id, primaryModel);
+    assert.equal(primarySample.project_id, projectId);
+    assert.match(primarySample.sample_id, /^smp_/);
+    const backupSample = parseSample(ingestPosts[1].body);
+    assert.equal(backupSample.model_id, backupModel);
     assert.equal(ingestPosts[0].authorization, `Bearer ${evalrouterKey}`);
     assert.notEqual(ingestPosts[0].authorization, `Bearer ${vendorKey}`);
 
@@ -339,7 +341,7 @@ describe("Live SDK samples R3", () => {
     assert.equal(ingestPosts.length, 0);
   });
 
-  it("does not POST an ingest sample when the backup returns content", async () => {
+  it("queues the primary failure sample when the backup returns content", async () => {
     policyReply = () =>
       new Response(
         JSON.stringify(
@@ -364,8 +366,11 @@ describe("Live SDK samples R3", () => {
     const result = await sdk.complete({ prompt: "Backup worked." });
     assert.equal(result.content, "from-backup");
     assert.equal(result.model_id, backupModel);
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    assert.equal(ingestPosts.length, 0);
+    await waitUntil(() => ingestPosts.length === 1, "primary failure ingest");
+    const sample = parseSample(ingestPosts[0].body);
+    assert.equal(sample.why, "vendor_error");
+    assert.equal(sample.model_id, primaryModel);
+    assert.equal(sample.policy_id, "pol_live_sdk_l4");
   });
 
   it("complete() still does not GET policy when it queues a sample", async () => {
