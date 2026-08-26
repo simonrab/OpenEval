@@ -11,9 +11,14 @@ import {
   storeIdempotentResponse,
   type DraftEval,
 } from "../eval-set.js";
+import { attachImagePdfFiles } from "../eval-files.js";
 import { newJobId, newProjectId } from "../ids.js";
 import { isJsonObjectJob, jsonObjectDrafts } from "../job-types/json_object.js";
-import { draftsFromWhatGoodMeans } from "../job-types/unknown.js";
+import {
+  draftsFromWhatGoodMeans,
+  hasPersonSignals,
+  personDraftFromText,
+} from "../job-types/unknown.js";
 import { projectExists } from "../keys.js";
 import { buildAcceptUrl, signAcceptToken } from "../routes/accept.js";
 import {
@@ -56,14 +61,46 @@ function ensureProject(
   return { ok: true, projectId };
 }
 
+function personSignalText(input: GenerateInput): string {
+  return [
+    input.description,
+    input.what_good_means?.how_it_should_behave,
+    input.what_good_means?.success,
+  ]
+    .filter((part): part is string => typeof part === "string" && part.length > 0)
+    .join(" ");
+}
+
+function mergePersonDrafts(
+  drafts: DraftEval[],
+  input: GenerateInput,
+): DraftEval[] {
+  if (!hasPersonSignals(personSignalText(input))) {
+    return drafts;
+  }
+  if (input.what_good_means != null) {
+    const fromWgm = draftsFromWhatGoodMeans(input.what_good_means).filter(
+      (d) => d.score_how === "person",
+    );
+    drafts.push(...fromWgm);
+  }
+  if (!drafts.some((d) => d.score_how === "person")) {
+    drafts.push(personDraftFromText(input.description ?? personSignalText(input)));
+  }
+  return drafts;
+}
+
 function buildDrafts(input: GenerateInput): DraftEval[] | null {
   const description = input.description;
   const sampleFiles = input.sample_files;
   if (isJsonObjectJob(description)) {
-    return jsonObjectDrafts({
-      description: description ?? "",
-      sampleFiles,
-    });
+    return mergePersonDrafts(
+      jsonObjectDrafts({
+        description: description ?? "",
+        sampleFiles,
+      }),
+      input,
+    );
   }
   if (input.what_good_means != null) {
     const drafts = draftsFromWhatGoodMeans(input.what_good_means);
@@ -152,6 +189,10 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
 
     const run = db.transaction(() => {
       insertDraftEvals(db, copied.newEvalSetId, drafts);
+      const personIds = listMembers(db, copied.newEvalSetId)
+        .filter((e) => e.score_how === "person")
+        .map((e) => e.eval_id);
+      attachImagePdfFiles(db, personIds, input.sample_files ?? []);
 
       const jobRow = db
         .prepare(`SELECT job_id FROM eval_sets WHERE id = ?`)
@@ -243,6 +284,11 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
       jobId,
       drafts,
     });
+    attachImagePdfFiles(
+      db,
+      createdSet.evals.filter((e) => e.score_how === "person").map((e) => e.eval_id),
+      input.sample_files ?? [],
+    );
 
     const nCode = createdSet.evals.filter((e) => e.score_how === "code").length;
     const nPerson = createdSet.evals.filter((e) => e.score_how === "person").length;

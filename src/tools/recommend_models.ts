@@ -9,6 +9,7 @@ import {
 import { newRecId } from "../ids.js";
 import { getJobLimits } from "../job.js";
 import { deriveWrapKey, projectExists, readSecret } from "../keys.js";
+import { buildApproveUrl, signApproveToken } from "../routes/approve.js";
 import { buildReportUrl } from "../report-token.js";
 import { getRun, listRunResults } from "../runner/queue.js";
 import { hasEnoughTrustedEvals } from "../runner/worker.js";
@@ -270,6 +271,16 @@ export const handleRecommendModels: ToolHandler = async (body, ctx) => {
     const oldTrustedEvalIds = getOldTrustedEvalIds(db, input.eval_set_id);
     stats = dropModelsFailingOldEvals(stats, oldTrustedEvalIds);
   }
+  if (
+    input.intent === "after_failure" &&
+    typeof input.current_named_model === "string" &&
+    input.current_named_model.length > 0
+  ) {
+    const current = stats.find((s) => s.modelId === input.current_named_model);
+    if (current && !current.passedAll) {
+      stats = stats.filter((s) => s.modelId !== input.current_named_model);
+    }
+  }
   const picked = pickNamedModel(stats, limits, liveCatalog);
 
   const allTimes = results.map((r) => r.time_ms);
@@ -338,6 +349,11 @@ export const handleRecommendModels: ToolHandler = async (body, ctx) => {
     failingEvalIds: [],
   });
 
+  const approveUrl = buildApproveUrl(
+    baseUrl,
+    recId,
+    signApproveToken(ctx.apiKey ?? "", recId),
+  );
   const output = recommendModelsOutputSchema.parse({
     recommendation_id: recId,
     named_model: {
@@ -355,10 +371,11 @@ export const handleRecommendModels: ToolHandler = async (body, ctx) => {
       project_id: input.project_id,
       run_id: input.run_id,
     }),
+    approve_url: approveUrl,
     next_action: {
       tool: null,
-      args: {},
-      ask_human: null,
+      args: { approve_url: approveUrl },
+      ask_human: "open approve_url",
     },
   });
 

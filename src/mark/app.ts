@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import type Database from "better-sqlite3";
 import { listMembers } from "../eval-set.js";
+import { getEvalFile, listEvalFiles, type EvalFile } from "../eval-files.js";
 import { registerFormParser } from "../routes/form-parser.js";
 import {
   markFromFormBody,
@@ -197,6 +198,29 @@ function personOptions(people: PersonRow[], excludeIds: string[]): string {
     .join("\n");
 }
 
+function fileSectionHtml(
+  files: EvalFile[],
+  evalSetId: string,
+  evalId: string,
+  token: string,
+): string {
+  if (files.length === 0) {
+    return "";
+  }
+  return files
+    .map((file) => {
+      if (file.content.length === 0) {
+        return `<p class="missing-file">File missing: ${escapeHtml(file.path)}. Choose cannot mark if you cannot judge this example.</p>`;
+      }
+      const src = `/mark/file?eval_set_id=${encodeURIComponent(evalSetId)}&eval_id=${encodeURIComponent(evalId)}&token=${encodeURIComponent(token)}&path=${encodeURIComponent(file.path)}`;
+      if (file.mime === "application/pdf") {
+        return `<embed src="${escapeHtml(src)}" type="application/pdf" width="100%" height="360" />`;
+      }
+      return `<img src="${escapeHtml(src)}" alt="${escapeHtml(file.path)}" />`;
+    })
+    .join("\n");
+}
+
 function renderScreen(opts: {
   evalSetId: string;
   evalId: string;
@@ -204,6 +228,7 @@ function renderScreen(opts: {
   evalsLeft: number;
   goodMeans: { how_it_should_behave: string; success: string; must_never: string };
   input: string;
+  fileSection: string;
   draftMark: string | null;
   formType: MarkFormType;
   formMeta: FormRenderMeta;
@@ -219,6 +244,7 @@ function renderScreen(opts: {
     .replace("{{HOW_BEHAVE}}", escapeHtml(opts.goodMeans.how_it_should_behave))
     .replace("{{SUCCESS}}", escapeHtml(opts.goodMeans.success))
     .replace("{{MUST_NEVER}}", escapeHtml(opts.goodMeans.must_never))
+    .replace("{{FILE_SECTION}}", opts.fileSection)
     .replace("{{INPUT}}", escapeHtml(opts.input))
     .replace("{{DRAFT_SECTION}}", draftSection(opts.draftMark))
     .replace("{{FORM_FIELDS}}", renderFormFields(opts.formType, opts.draftMark, opts.formMeta))
@@ -233,6 +259,7 @@ function renderThird(opts: {
   personId: string;
   goodMeans: { how_it_should_behave: string; success: string; must_never: string };
   input: string;
+  fileSection: string;
   draftMark: string | null;
   formType: MarkFormType;
   formMeta: FormRenderMeta;
@@ -249,6 +276,7 @@ function renderThird(opts: {
     .replace("{{HOW_BEHAVE}}", escapeHtml(opts.goodMeans.how_it_should_behave))
     .replace("{{SUCCESS}}", escapeHtml(opts.goodMeans.success))
     .replace("{{MUST_NEVER}}", escapeHtml(opts.goodMeans.must_never))
+    .replace("{{FILE_SECTION}}", opts.fileSection)
     .replace("{{INPUT}}", escapeHtml(opts.input))
     .replace("{{DRAFT_SECTION}}", draftSection(opts.draftMark))
     .replace("{{FORM_FIELDS}}", renderFormFields(opts.formType, opts.draftMark, opts.formMeta))
@@ -277,6 +305,35 @@ export async function registerMarkRoutes(
   apiKey: string,
 ): Promise<void> {
   registerFormParser(app);
+
+  app.get("/mark/file", async (request, reply) => {
+    const query = request.query as {
+      eval_set_id?: string;
+      eval_id?: string;
+      token?: string;
+      path?: string;
+    };
+    const evalSetId = query.eval_set_id;
+    const evalId = query.eval_id;
+    if (!evalSetId || !evalId) {
+      return reply.code(400).send("eval_set_id and eval_id are required");
+    }
+    if (!verifyMarkToken(apiKey, evalSetId, query.token)) {
+      return reply.code(401).send("unauthorized");
+    }
+    const member = listMembers(db, evalSetId).find((m) => m.eval_id === evalId);
+    if (!member) {
+      return reply.code(404).send("eval not found");
+    }
+    const files = listEvalFiles(db, evalId);
+    const file = query.path
+      ? getEvalFile(db, evalId, query.path)
+      : files[0] ?? null;
+    if (!file || file.content.length === 0) {
+      return reply.code(404).send("file not found");
+    }
+    return reply.type(file.mime).send(file.content);
+  });
 
   app.get("/mark", async (request, reply) => {
     const query = request.query as {
@@ -351,6 +408,12 @@ export async function registerMarkRoutes(
       evalsLeft: countRemainingQueue(db, evalSetId),
       goodMeans,
       input: row.input_truncated,
+      fileSection: fileSectionHtml(
+        listEvalFiles(db, next.eval_id),
+        evalSetId,
+        next.eval_id,
+        query.token ?? "",
+      ),
       draftMark: row.draft_mark,
       formType,
       formMeta,
@@ -447,6 +510,12 @@ export async function registerMarkRoutes(
       evalsLeft: countRemainingQueue(db, evalSetId),
       goodMeans,
       input: row.input_truncated,
+      fileSection: fileSectionHtml(
+        listEvalFiles(db, evalId),
+        evalSetId,
+        evalId,
+        token ?? "",
+      ),
       draftMark: row.draft_mark,
       formType,
       formMeta,
@@ -533,6 +602,12 @@ export async function registerMarkRoutes(
       personId: third.id,
       goodMeans,
       input: row.input_truncated,
+      fileSection: fileSectionHtml(
+        listEvalFiles(db, evalId),
+        evalSetId,
+        evalId,
+        query.token ?? "",
+      ),
       draftMark: row.draft_mark,
       formType,
       formMeta,

@@ -10,6 +10,7 @@ import {
   truncateInput,
 } from "../eval-set.js";
 import { newEvalId } from "../ids.js";
+import { attachImagePdfFiles } from "../eval-files.js";
 import { projectExists } from "../keys.js";
 import { buildMarkUrl, signMarkToken } from "../mark/tokens.js";
 import type { ToolHandler } from "../dispatch.js";
@@ -103,6 +104,9 @@ export const handleRegisterFailure: ToolHandler = (body, ctx) => {
   db.prepare(
     `INSERT INTO eval_set_members (eval_set_id, eval_id) VALUES (?, ?)`,
   ).run(copied.newEvalSetId, evalId);
+  if (scoreHow === "person" && input.input.files) {
+    attachImagePdfFiles(db, [evalId], input.input.files);
+  }
 
   const markUrl =
     scoreHow === "person"

@@ -145,9 +145,81 @@ function preferCurrent(models: CatalogModel[]): CatalogModel[] {
   return current.length > 0 ? current : models;
 }
 
+function compareCostThenRecency(a: CatalogModel, b: CatalogModel): number {
+  if (a.listCostPer1kUsd !== b.listCostPer1kUsd) {
+    return a.listCostPer1kUsd - b.listCostPer1kUsd;
+  }
+  return b.created - a.created;
+}
+
+/**
+ * Keep models that are not beaten on both list cost and recency.
+ * Recency is a stand-in for capability when we have not run evals yet.
+ * Naming still uses this job’s evals, not a public ranking.
+ */
+export function undominatedOnCostAndRecency(
+  models: CatalogModel[],
+): CatalogModel[] {
+  return models.filter((a) => {
+    return !models.some((b) => {
+      if (b.id === a.id) {
+        return false;
+      }
+      const cheaperOrEqual = b.listCostPer1kUsd <= a.listCostPer1kUsd;
+      const newerOrEqual = b.created >= a.created;
+      const strict =
+        b.listCostPer1kUsd < a.listCostPer1kUsd || b.created > a.created;
+      return cheaperOrEqual && newerOrEqual && strict;
+    });
+  });
+}
+
+function takeDiverseThenFill(
+  preferred: CatalogModel[],
+  rest: CatalogModel[],
+  n: number,
+): CatalogModel[] {
+  const picked: CatalogModel[] = [];
+  const seenProvider = new Set<string>();
+
+  const add = (model: CatalogModel): void => {
+    if (picked.length >= n) {
+      return;
+    }
+    if (picked.some((p) => p.id === model.id)) {
+      return;
+    }
+    picked.push(model);
+  };
+
+  const addOnePerProvider = (source: CatalogModel[]): void => {
+    for (const model of source) {
+      if (picked.length >= n) {
+        break;
+      }
+      const prefix = providerPrefix(model.id);
+      if (seenProvider.has(prefix)) {
+        continue;
+      }
+      seenProvider.add(prefix);
+      add(model);
+    }
+  };
+
+  addOnePerProvider(preferred);
+  for (const model of preferred) {
+    add(model);
+  }
+  addOnePerProvider(rest);
+  for (const model of rest) {
+    add(model);
+  }
+  return picked;
+}
+
 /**
  * Spec: default short list size 5, and that list must fit job limits.
- * Prefer current cheap paid models, one per provider first, then fill.
+ * Take current models on the cost/recency frontier first, then fill.
  * Naming still happens later from measured run cost/time among passers.
  */
 export function pickDefaultModels(
@@ -160,36 +232,12 @@ export function pickDefaultModels(
   );
   const paid = eligible.filter((m) => !isFreeTier(m));
   const pool = paid.length > 0 ? paid : eligible;
-  const sorted = [...pool].sort((a, b) => {
-    if (a.listCostPer1kUsd !== b.listCostPer1kUsd) {
-      return a.listCostPer1kUsd - b.listCostPer1kUsd;
-    }
-    return b.created - a.created;
-  });
-
-  const picked: CatalogModel[] = [];
-  const seenProvider = new Set<string>();
-  for (const model of sorted) {
-    if (picked.length >= n) {
-      break;
-    }
-    const prefix = providerPrefix(model.id);
-    if (seenProvider.has(prefix)) {
-      continue;
-    }
-    seenProvider.add(prefix);
-    picked.push(model);
-  }
-  for (const model of sorted) {
-    if (picked.length >= n) {
-      break;
-    }
-    if (picked.some((p) => p.id === model.id)) {
-      continue;
-    }
-    picked.push(model);
-  }
-  return picked;
+  const sorted = [...pool].sort(compareCostThenRecency);
+  const frontier = [...undominatedOnCostAndRecency(pool)].sort(
+    compareCostThenRecency,
+  );
+  const rest = sorted.filter((m) => !frontier.some((f) => f.id === m.id));
+  return takeDiverseThenFill(frontier, rest, n);
 }
 
 export function catalogById(catalog: CatalogModel[]): Map<string, CatalogModel> {

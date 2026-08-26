@@ -13,6 +13,7 @@ import {
   createTestApp,
   seedFiveTrustedEvals,
   storeCustomerKey,
+  waitForRunComplete,
 } from "./helpers/run-fixtures.js";
 
 type RegisterSuccess = {
@@ -280,6 +281,126 @@ describe("register_failure (J5)", () => {
       assert.ok(trusted.some((m) => m.eval_id === registered.eval_id));
     } finally {
       readDb.close();
+    }
+  });
+
+  it("recheck after J5: old ste_ unchanged, new ste_ includes the failure", async () => {
+    const db = new Database(sqlitePath);
+    const keysRef = await storeCustomerKey(db, projectId);
+    const now = new Date().toISOString();
+    const recId = "rec_j5_recheck";
+    const namedModelId = "openai/gpt-4o-mini";
+    db.prepare(
+      `INSERT INTO runs
+        (id, project_id, eval_set_id, eval_set_version, status, code, models,
+         max_eval_spend_usd, keys_ref, intent, named_model, new_failures,
+         spend_usd, idempotency_key, created_at, updated_at)
+       VALUES ('run_j5_v1', ?, ?, 1, 'succeeded', NULL, ?, 5, ?, 'new_feature',
+               NULL, NULL, 0.2, 'seed-j5-v1', ?, ?)`,
+    ).run(projectId, evalSetId, JSON.stringify([namedModelId]), keysRef, now, now);
+    db.prepare(
+      `INSERT INTO recommendations
+        (id, project_id, eval_set_id, run_id, intent, named_model_id,
+         backup_model_ids, quality_json, time_json, cost_usd, failing_eval_ids, created_at)
+       VALUES (?, ?, ?, 'run_j5_v1', 'new_feature', ?, '[]',
+               '{"n_pass":5,"n_fail":0}', '{"p50":100,"p95":200}', 0.2, '[]', ?)`,
+    ).run(recId, projectId, evalSetId, namedModelId, now);
+    db.close();
+
+    const beforeDb = new Database(sqlitePath, { readonly: true });
+    const beforeIds = listMembers(beforeDb, evalSetId).map((m) => m.eval_id).sort();
+    beforeDb.close();
+
+    const registered = (
+      await postRegister(app, {
+        project_id: projectId,
+        eval_set_id: evalSetId,
+        input: { prompt: "no total after live fail" },
+        why_bad: "total_cents missing",
+        program_check: {
+          kind: "field_equals",
+          expected: { path: "total_cents", exists: true },
+        },
+        idempotency_key: "reg-j5-recheck",
+      })
+    ).json() as RegisterSuccess;
+
+    const db2 = new Database(sqlitePath);
+    db2.prepare(
+      `INSERT INTO runs
+        (id, project_id, eval_set_id, eval_set_version, status, code, models,
+         max_eval_spend_usd, keys_ref, intent, named_model, new_failures,
+         spend_usd, idempotency_key, created_at, updated_at)
+       VALUES ('run_j5_v2', ?, ?, 2, 'succeeded', NULL, ?, 5, ?, 'new_feature',
+               NULL, NULL, 0.2, 'seed-j5-v2', ?, ?)`,
+    ).run(
+      projectId,
+      registered.eval_set_id,
+      JSON.stringify([namedModelId]),
+      keysRef,
+      now,
+      now,
+    );
+    db2.prepare(
+      `INSERT INTO recommendations
+        (id, project_id, eval_set_id, run_id, intent, named_model_id,
+         backup_model_ids, quality_json, time_json, cost_usd, failing_eval_ids, created_at)
+       VALUES ('rec_j5_v2', ?, ?, 'run_j5_v2', 'new_feature', ?, '[]',
+               '{"n_pass":6,"n_fail":0}', '{"p50":100,"p95":200}', 0.2, '[]', ?)`,
+    ).run(projectId, registered.eval_set_id, namedModelId, now);
+    db2.close();
+
+    const oldRun = await app.inject({
+      method: "POST",
+      url: "/v1/tools/run_evals",
+      headers: authHeaders(),
+      payload: {
+        project_id: projectId,
+        eval_set_id: evalSetId,
+        max_eval_spend_usd: 5,
+        keys_ref: keysRef,
+        intent: "recheck",
+        named_model: { rec_id: recId, model_id: namedModelId },
+        idempotency_key: "recheck-j5-old",
+      },
+    });
+    assert.equal(oldRun.statusCode, 200);
+    const oldReport = await waitForRunComplete(
+      app,
+      projectId,
+      (oldRun.json() as { run_id: string }).run_id,
+    );
+    const oldScored = oldReport.eval_ids_scored as string[];
+    assert.ok(!oldScored.includes(registered.eval_id));
+    const afterDb = new Database(sqlitePath, { readonly: true });
+    const membersAfter = listMembers(afterDb, evalSetId);
+    afterDb.close();
+    assert.deepEqual(membersAfter.map((m) => m.eval_id).sort(), beforeIds);
+
+    const newRun = await app.inject({
+      method: "POST",
+      url: "/v1/tools/run_evals",
+      headers: authHeaders(),
+      payload: {
+        project_id: projectId,
+        eval_set_id: registered.eval_set_id,
+        max_eval_spend_usd: 5,
+        keys_ref: keysRef,
+        intent: "recheck",
+        named_model: { rec_id: "rec_j5_v2", model_id: namedModelId },
+        idempotency_key: "recheck-j5-new",
+      },
+    });
+    assert.equal(newRun.statusCode, 200);
+    const newReport = await waitForRunComplete(
+      app,
+      projectId,
+      (newRun.json() as { run_id: string }).run_id,
+    );
+    const newScored = newReport.eval_ids_scored as string[];
+    assert.ok(newScored.includes(registered.eval_id));
+    for (const id of oldEvalIds) {
+      assert.ok(newScored.includes(id), `old eval ${id} missing from new recheck`);
     }
   });
 });

@@ -159,6 +159,10 @@ export function buildReport(
     eval_ids_not_scored: evalIdsNotScored,
   });
 
+  const namedModel = run.named_model
+    ? (JSON.parse(run.named_model) as { rec_id: string; model_id: string })
+    : null;
+
   let nextTool: string | null = "recommend_models";
   let nextArgs: Record<string, unknown> = {
     project_id: input.project_id,
@@ -173,7 +177,10 @@ export function buildReport(
     nextArgs = {};
   } else if (code === ErrorCode.evals_missing_new_failures) {
     nextTool = "register_failure";
-    nextArgs = { project_id: input.project_id };
+    nextArgs = {
+      project_id: input.project_id,
+      eval_set_id: run.eval_set_id,
+    };
   } else if (code === ErrorCode.need_new_model) {
     nextTool = "recommend_models";
     nextArgs = {
@@ -181,15 +188,12 @@ export function buildReport(
       eval_set_id: run.eval_set_id,
       run_id: run.id,
       intent: "after_failure",
+      current_named_model: namedModel?.model_id ?? null,
     };
   } else if (code === ErrorCode.COST_CAP_EXCEEDED) {
     nextTool = "get_eval_report";
     nextArgs = { project_id: input.project_id, run_id: run.id };
   }
-
-  const namedModel = run.named_model
-    ? (JSON.parse(run.named_model) as { rec_id: string; model_id: string })
-    : null;
   const namedModelSummary = namedModel
     ? modelSummaries.find((m) => m.model_id === namedModel.model_id)
     : null;

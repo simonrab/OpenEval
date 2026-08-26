@@ -324,6 +324,7 @@ export const recommendModelsOutputSchema = z
       .strict(),
     cost_usd: z.number(),
     report_url: z.string(),
+    approve_url: z.string(),
     next_action: nextActionSchema,
   })
   .strict();

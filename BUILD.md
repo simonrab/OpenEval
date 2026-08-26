@@ -434,11 +434,22 @@ This is the north-star demo: does it work, which cheapest fast model made it wor
 
 ### M7 — Spec complete (week 6)
 
-Not a twelfth product. Slices 0–10 already cover J1–J8. This week closes gaps so v0 matches requirements section 14.
+Not a twelfth product. Slices 0–10 already cover J1–J8. This week closes remaining gaps so v0 matches requirements section 14. Do not invent a new job-type library, extra tools, a dashboard, or a React app.
 
-Prove: unknown job type (no fake match); image/PDF limits (`needs_images`; models that cannot see images drop before quality); named-model page with name, backups, quality, time, cost, failing evals; read-only `report_url` (still no dashboard); all agent error codes branch; recheck after J5 on the **new** version includes the new eval and the old ones; after-failure recommend is an agent job, not CI.
+**Done-when**
 
-**Demo.** One Cursor session for a mixed job (JSON + tone). Mark. Name a model. Write `.env`. Register a failure. Recheck old version (unchanged). Recheck new version (includes the failure). CI green then red.
+- [x] JSON-object detection uses structural JSON signals only. Bare `"invoice"` is not a known type. Vague or unstructured extract jobs return `JOB_UNCLEAR`, not a fake JSON suite.
+- [x] A mixed job (JSON + tone) yields `n_code > 0` and `n_person > 0`. After accept, `after_accept_tool` is `queue_for_labeling`.
+- [x] Image/PDF attachments are stored on the eval. The mark screen and third-person screen show the file. Existing pass/fail / fields / rubric widgets stay. No `form_type: "file"`. No region mark.
+- [x] Named-model page shows name, 0–2 backups, quality, time, cost, and failing evals (including `does_not_work`). Approve does not change live traffic.
+- [x] `recommend_models` returns a signed `approve_url`. When a name exists, `next_action.ask_human` is `open approve_url`.
+- [x] All ten agent error codes return a usable `next_action`. `need_new_model` → `recommend_models` with `intent: "after_failure"` and `current_named_model`. CI never calls `recommend_models` and never writes `.env`.
+- [x] Recheck after J5: old `ste_` unchanged (new eval absent). New `ste_` includes old evals and the new eval.
+- [x] One HTTP mixed-job loop: generate → accept code → mark tone → run → recommend → approve → `register_failure` → recheck old / recheck new → `ci_exit` 0 then non-zero.
+
+**Already shipped (do not rebuild).** `needs_images` drops non-vision models before quality. Signed read-only `report_url` (no dashboard). Vague description → `JOB_UNCLEAR` → `what_good_means`. J5 copy-forward. CI script hygiene.
+
+**Demo.** Tests are the done-when. A live Cursor session for the mixed job is optional if `OPENROUTER_API_KEY` is present. Do not block M7 on a manual session.
 
 v0 is done when requirements section 14 holds.
 

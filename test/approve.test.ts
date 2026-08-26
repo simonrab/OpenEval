@@ -96,8 +96,28 @@ describe("approve screen (J4)", () => {
     assert.equal(res.statusCode, 200);
     assert.match(res.headers["content-type"] ?? "", /text\/html/);
     const html = res.body;
+    const db = new Database(sqlitePath, { readonly: true });
+    const rec = db
+      .prepare(
+        `SELECT named_model_id, quality_json, time_json, cost_usd
+         FROM recommendations WHERE id = ?`,
+      )
+      .get(recId) as {
+      named_model_id: string;
+      quality_json: string;
+      time_json: string;
+      cost_usd: number;
+    };
+    db.close();
+    const quality = JSON.parse(rec.quality_json) as { n_pass: number; n_fail: number };
+    const time = JSON.parse(rec.time_json) as { p50: number; p95: number };
     assert.match(html, /Named model recommendation/i);
     assert.match(html, /live traffic/i);
+    assert.match(html, new RegExp(rec.named_model_id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(html, new RegExp(`${quality.n_pass} pass`));
+    assert.match(html, new RegExp(`${Math.round(time.p50)}`));
+    assert.match(html, new RegExp(rec.cost_usd.toFixed(4)));
+    assert.match(html, /Failing evals/);
     assert.doesNotMatch(html, /unit test/i);
   });
 
@@ -134,6 +154,36 @@ describe("approve screen (J4)", () => {
       `MODEL=${rec.named_model_id}\n`,
     );
     assert.notEqual(readFileSync(customerEnvPath, "utf8"), customerEnvBefore);
+  });
+
+  it("shows failing evals when no model works", async () => {
+    const recId = "rec_does_not_work";
+    const db = new Database(sqlitePath);
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO runs
+        (id, project_id, eval_set_id, eval_set_version, status, code, models,
+         max_eval_spend_usd, keys_ref, intent, named_model, new_failures,
+         spend_usd, idempotency_key, created_at, updated_at)
+       VALUES (?, ?, ?, 1, 'succeeded', NULL, '[]', 5, ?, 'new_feature', NULL, NULL, 0, ?, ?, ?)`,
+    ).run("run_dnw", projectId, evalSetId, keysRef, "run-dnw", now, now);
+    db.prepare(
+      `INSERT INTO recommendations
+        (id, project_id, eval_set_id, run_id, intent, named_model_id,
+         backup_model_ids, quality_json, time_json, cost_usd, failing_eval_ids, created_at)
+       VALUES (?, ?, ?, 'run_dnw', 'new_feature', NULL, '[]', '{"n_pass":0,"n_fail":1}',
+               '{"p50":0,"p95":0}', 0, ?, ?)`,
+    ).run(recId, projectId, evalSetId, JSON.stringify(["cas_fail_1"]), now);
+    db.close();
+
+    const token = approveToken(TEST_API_KEY, recId);
+    const res = await app.inject({
+      method: "GET",
+      url: `/approve?recommendation_id=${encodeURIComponent(recId)}&token=${token}`,
+    });
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body, /\(none\)/);
+    assert.match(res.body, /cas_fail_1/);
   });
 
   it("GET without a valid token is rejected", async () => {

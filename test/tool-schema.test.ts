@@ -333,7 +333,12 @@ describe("output schemas", () => {
         time_ms: { p50: 820, p95: 2100 },
         cost_usd: 0.42,
         report_url: "https://example.invalid/report",
-        next_action: { tool: null, args: {}, ask_human: null },
+        approve_url: "https://example.invalid/approve?token=signed",
+        next_action: {
+          tool: null,
+          args: { approve_url: "https://example.invalid/approve?token=signed" },
+          ask_human: "open approve_url",
+        },
       }).success,
       true,
     );

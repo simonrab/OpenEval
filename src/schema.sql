@@ -174,3 +174,13 @@ CREATE TABLE IF NOT EXISTS marks (
   FOREIGN KEY (eval_id) REFERENCES evals(id),
   FOREIGN KEY (person_id) REFERENCES people(id)
 );
+
+-- M7: image/PDF attachments shown on the mark screen (display only).
+CREATE TABLE IF NOT EXISTS eval_files (
+  eval_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  content BLOB NOT NULL,
+  PRIMARY KEY (eval_id, path),
+  FOREIGN KEY (eval_id) REFERENCES evals(id)
+);

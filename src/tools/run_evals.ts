@@ -93,7 +93,10 @@ export const handleRunEvals: ToolHandler = async (body, ctx) => {
 
   const intent = input.intent ?? "new_feature";
   if (intent === "recheck" && input.max_eval_spend_usd <= 0) {
-    return { status: 400, body: costCapRequiredError() };
+    return { status: 400, body: costCapRequiredError({
+      project_id: input.project_id,
+      eval_set_id: input.eval_set_id,
+    }) };
   }
 
   const evalSet = getEvalSet(db, input.eval_set_id);

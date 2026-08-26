@@ -155,6 +155,11 @@ describe("recommend_models (J4)", () => {
       (body as { next_action: { tool: string | null } }).next_action.tool,
       null,
     );
+    assert.match((body as { approve_url: string }).approve_url, /\/approve\?/);
+    assert.equal(
+      (body as { next_action: { ask_human: string | null } }).next_action.ask_human,
+      "open approve_url",
+    );
   });
 
   it("returns need_more_evals when trusted count is below bar", async () => {
@@ -318,5 +323,48 @@ describe("recommend_models (J4)", () => {
     const body = res.json();
     assert.equal(isAgentError(body), true);
     assert.equal(body.next_action.tool, "run_evals");
+  });
+
+  it("after_failure does not re-name a current model that failed", async () => {
+    const cheapFail = "openai/gpt-4o-mini";
+    const backupPass = "google/gemini-flash-1.5";
+    const runId = "run_after_failure";
+    seedFinishedRun(
+      runId,
+      evalIds.flatMap((evalId) => [
+        {
+          modelId: cheapFail,
+          evalId,
+          passed: false,
+          timeMs: 80,
+          costUsd: 0.01,
+        },
+        {
+          modelId: backupPass,
+          evalId,
+          passed: true,
+          timeMs: 120,
+          costUsd: 0.02,
+        },
+      ]),
+    );
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/tools/recommend_models",
+      headers: authHeaders(),
+      payload: {
+        project_id: projectId,
+        eval_set_id: evalSetId,
+        run_id: runId,
+        intent: "after_failure",
+        current_named_model: cheapFail,
+        idempotency_key: "rec-after-fail",
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { named_model: { id: string } | null };
+    assert.ok(body.named_model);
+    assert.equal(body.named_model!.id, backupPass);
+    assert.notEqual(body.named_model!.id, cheapFail);
   });
 });

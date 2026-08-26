@@ -5,11 +5,28 @@ const PERSON_RE =
 const CODE_RE =
   /\b(json|field|equal|contain|valid|must never|must not|schema|exact|markdown)\b/i;
 
+export function hasPersonSignals(text: string | undefined): boolean {
+  if (!text) {
+    return false;
+  }
+  return PERSON_RE.test(text);
+}
+
 function preferCode(text: string): boolean {
   if (PERSON_RE.test(text) && !CODE_RE.test(text)) {
     return false;
   }
   return true;
+}
+
+export function personDraftFromText(text: string): DraftEval {
+  return {
+    title: "Tone and reply quality",
+    score_how: "person",
+    status: "draft",
+    program_check: null,
+    input_truncated: truncateInput(text),
+  };
 }
 
 function titleFrom(prefix: string, text: string): string {

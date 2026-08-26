@@ -190,6 +190,28 @@ function compareCheapestFast(a: ModelStats, b: ModelStats): number {
   return a.p50TimeMs - b.p50TimeMs;
 }
 
+/** Spec: name a costlier or slower model only if quality is clearly better. */
+const QUALITY_LIFT = 0.05;
+
+function passRate(s: ModelStats): number {
+  const n = s.nPass + s.nFail;
+  return n === 0 ? 0 : s.nPass / n;
+}
+
+function undominatedOnCostAndTime(stats: ModelStats[]): ModelStats[] {
+  return stats.filter((a) => {
+    return !stats.some((b) => {
+      if (b.modelId === a.modelId) {
+        return false;
+      }
+      const cheaperOrEqual = b.totalCostUsd <= a.totalCostUsd;
+      const fasterOrEqual = b.p50TimeMs <= a.p50TimeMs;
+      const strict = b.totalCostUsd < a.totalCostUsd || b.p50TimeMs < a.p50TimeMs;
+      return cheaperOrEqual && fasterOrEqual && strict;
+    });
+  });
+}
+
 export function pickNamedModel(
   stats: ModelStats[],
   limits: JobLimits | null,
@@ -204,12 +226,20 @@ export function pickNamedModel(
     return { outcome: "does_not_work", failingEvalIds };
   }
 
-  const sorted = [...passers].sort(compareCheapestFast);
-  const winner = sorted[0]!;
-  const backups = sorted
-    .slice(1, 3)
-    .map((s) => s.modelId)
-    .filter((id) => id !== winner.modelId);
+  const cheapestFast = [...passers].sort(compareCheapestFast)[0]!;
+  const clearlyBetter = passers.filter(
+    (s) => passRate(s) - passRate(cheapestFast) >= QUALITY_LIFT,
+  );
+  const winner =
+    clearlyBetter.length > 0
+      ? [...clearlyBetter].sort(compareCheapestFast)[0]!
+      : cheapestFast;
+
+  const backups = undominatedOnCostAndTime(passers)
+    .filter((s) => s.modelId !== winner.modelId)
+    .sort(compareCheapestFast)
+    .slice(0, 2)
+    .map((s) => s.modelId);
 
   return {
     outcome: "named",

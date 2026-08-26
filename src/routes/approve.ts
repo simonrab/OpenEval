@@ -38,6 +38,17 @@ export function verifyApproveToken(
   return timingSafeEqual(a, b);
 }
 
+export function buildApproveUrl(
+  baseUrl: string,
+  recommendationId: string,
+  token: string,
+): string {
+  const url = new URL("/approve", baseUrl);
+  url.searchParams.set("recommendation_id", recommendationId);
+  url.searchParams.set("token", token);
+  return url.toString();
+}
+
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -53,6 +64,7 @@ type RecommendationRow = {
   quality_json: string;
   time_json: string;
   cost_usd: number;
+  failing_eval_ids: string;
 };
 
 function getRecommendation(
@@ -61,7 +73,7 @@ function getRecommendation(
 ): RecommendationRow | null {
   const row = db
     .prepare(
-      `SELECT id, named_model_id, backup_model_ids, quality_json, time_json, cost_usd
+      `SELECT id, named_model_id, backup_model_ids, quality_json, time_json, cost_usd, failing_eval_ids
        FROM recommendations WHERE id = ?`,
     )
     .get(recommendationId) as RecommendationRow | undefined;
@@ -77,6 +89,7 @@ function renderApprovePage(opts: {
   timeP50: string;
   timeP95: string;
   costUsd: string;
+  failingEvals: string;
   banner: string;
 }): string {
   const template = readFileSync(templatePath, "utf8");
@@ -89,6 +102,7 @@ function renderApprovePage(opts: {
     .replaceAll("{{TIME_P50}}", escapeHtml(opts.timeP50))
     .replaceAll("{{TIME_P95}}", escapeHtml(opts.timeP95))
     .replaceAll("{{COST_USD}}", escapeHtml(opts.costUsd))
+    .replaceAll("{{FAILING_EVALS}}", escapeHtml(opts.failingEvals))
     .replace("{{BANNER}}", opts.banner);
 }
 
@@ -106,6 +120,7 @@ function formatRecommendation(rec: RecommendationRow) {
   };
   const time = JSON.parse(rec.time_json) as { p50: number; p95: number };
   const backups = JSON.parse(rec.backup_model_ids) as string[];
+  const failing = JSON.parse(rec.failing_eval_ids) as string[];
   return {
     namedModel: rec.named_model_id ?? "(none)",
     backups: backups.length > 0 ? backups.join(", ") : "(none)",
@@ -113,6 +128,7 @@ function formatRecommendation(rec: RecommendationRow) {
     timeP50: String(Math.round(time.p50)),
     timeP95: String(Math.round(time.p95)),
     costUsd: rec.cost_usd.toFixed(4),
+    failingEvals: failing.length > 0 ? failing.join(", ") : "(none)",
   };
 }
 
@@ -149,6 +165,7 @@ export async function registerApprove(
       timeP50: fmt.timeP50,
       timeP95: fmt.timeP95,
       costUsd: fmt.costUsd,
+      failingEvals: fmt.failingEvals,
       banner: "",
     });
     return reply.type("text/html").send(html);
@@ -217,6 +234,7 @@ export async function registerApprove(
       timeP50: fmt.timeP50,
       timeP95: fmt.timeP95,
       costUsd: fmt.costUsd,
+      failingEvals: fmt.failingEvals,
       banner: `<p>Saved decision: ${escapeHtml(decision)}. EvalRouter did not write app config. live_traffic_changed = false.</p>`,
     });
     return reply.type("text/html").send(html);

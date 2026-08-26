@@ -168,6 +168,34 @@ describe("pickDefaultModels (short list that fits limits)", () => {
     });
     assert.equal(picked.length, 0);
   });
+
+  it("keeps a current frontier model that five cheaper providers would crowd out", () => {
+    const now = 1_742_000_000;
+    const crowded: CatalogModel[] = [
+      model("openai/cheap", { listCostPer1kUsd: 0.00001, created: now - 10_000 }),
+      model("google/cheap", { listCostPer1kUsd: 0.00002, created: now - 10_000 }),
+      model("mistralai/cheap", { listCostPer1kUsd: 0.00003, created: now - 10_000 }),
+      model("meta-llama/cheap", { listCostPer1kUsd: 0.00004, created: now - 10_000 }),
+      model("amazon/cheap", { listCostPer1kUsd: 0.00005, created: now - 10_000 }),
+      model("anthropic/claude-haiku-4.5", {
+        supportsImages: true,
+        inputModalities: ["text", "image"],
+        listCostPer1kUsd: 0.0004,
+        created: now,
+      }),
+      model("openai/old-expensive", {
+        listCostPer1kUsd: 0.02,
+        created: now - 20_000,
+      }),
+    ];
+    const ids = pickDefaultModels(crowded, null).map((m) => m.id);
+    assert.ok(
+      ids.includes("anthropic/claude-haiku-4.5"),
+      `frontier model missing from short list: ${ids.join(",")}`,
+    );
+    assert.ok(!ids.includes("openai/old-expensive"));
+    assert.ok(ids.length <= DEFAULT_SHORT_LIST_SIZE);
+  });
 });
 
 describe("parseOpenRouterModels", () => {

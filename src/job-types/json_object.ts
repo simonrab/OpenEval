@@ -17,9 +17,6 @@ export function isJsonObjectJob(description: string | undefined): boolean {
   if (d.includes("total_cents")) {
     return true;
   }
-  if (d.includes("invoice")) {
-    return true;
-  }
   if (/return\s+json\s+with/i.test(description)) {
     return true;
   }

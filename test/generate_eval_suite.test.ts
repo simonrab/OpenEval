@@ -222,6 +222,29 @@ describe("generate_eval_suite (J1)", () => {
     assert.equal((body as { code: string }).code, ErrorCode.INVALID_INPUT);
   });
 
+  it("unstructured PDF invoice extract returns JOB_UNCLEAR not a JSON suite", async () => {
+    const res = await postGenerate(app, {
+      description: "Extract fields from PDF invoices without a fixed schema",
+      idempotency_key: "idem-pdf-invoice",
+    });
+    assert.ok(res.statusCode >= 400 && res.statusCode < 500);
+    const body: unknown = res.json();
+    assert.equal(isAgentError(body), true);
+    assert.equal((body as { code: string }).code, ErrorCode.JOB_UNCLEAR);
+  });
+
+  it("mixed JSON plus tone yields code and person drafts", async () => {
+    const res = await postGenerate(app, {
+      description: "Return JSON with line_items and a warm friendly tone",
+      idempotency_key: "idem-mixed-tone",
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as GenerateSuccess;
+    assert.ok(body.n_code > 0);
+    assert.ok(body.n_person > 0);
+    assert.equal(body.next_action.args.after_accept_tool, "queue_for_labeling");
+  });
+
   it("sample_files become extra draft evals", async () => {
     const res = await postGenerate(app, {
       description: DEMO_DESCRIPTION,

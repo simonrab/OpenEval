@@ -46,7 +46,11 @@ export function projectNotFoundError(projectId: string): AgentError {
     retryable: false,
     suggested_tool: null,
     suggested_args: { project_id: projectId },
-    next_action: { tool: null, args: {}, ask_human: null },
+    next_action: {
+      tool: null,
+      args: { project_id: projectId },
+      ask_human: "Pass a real prj_",
+    },
   });
 }
 
@@ -57,7 +61,11 @@ export function suiteNotFoundError(evalSetId: string): AgentError {
     retryable: false,
     suggested_tool: null,
     suggested_args: { eval_set_id: evalSetId },
-    next_action: { tool: null, args: {}, ask_human: null },
+    next_action: {
+      tool: null,
+      args: { eval_set_id: evalSetId },
+      ask_human: "Pass a saved ste_",
+    },
   });
 }
 
@@ -82,14 +90,22 @@ export function needMoreEvalsError(
   });
 }
 
-export function costCapRequiredError(): AgentError {
+export function costCapRequiredError(args: {
+  project_id: string;
+  eval_set_id: string;
+}): AgentError {
+  const retryArgs = {
+    project_id: args.project_id,
+    eval_set_id: args.eval_set_id,
+    max_eval_spend_usd: 1,
+  };
   return agentError({
     code: ErrorCode.COST_CAP_REQUIRED,
     message: "max_eval_spend_usd must be greater than 0 for recheck",
     retryable: true,
     suggested_tool: "run_evals",
-    suggested_args: {},
-    next_action: { tool: "run_evals", args: {}, ask_human: null },
+    suggested_args: retryArgs,
+    next_action: { tool: "run_evals", args: retryArgs, ask_human: null },
   });
 }
 
@@ -100,7 +116,11 @@ export function namedModelMismatchError(): AgentError {
     retryable: false,
     suggested_tool: null,
     suggested_args: {},
-    next_action: { tool: null, args: {}, ask_human: null },
+    next_action: {
+      tool: null,
+      args: {},
+      ask_human: "Pass the saved named model",
+    },
   });
 }
 

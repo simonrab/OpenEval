@@ -172,4 +172,39 @@ describe("rank (J4)", () => {
     assert.ok(limited.some((s) => s.modelId === "google/gemini-2.5-flash"));
     assert.ok(!limited.some((s) => s.modelId === "mistralai/mistral-small-3.1"));
   });
+
+  it("does not name a costlier or slower passer when quality is not clearly better", () => {
+    const results = [
+      row("cheap-slow", "cas_a", true, 400, 0.01),
+      row("cheap-slow", "cas_b", true, 420, 0.01),
+      row("costly-fast", "cas_a", true, 40, 0.08),
+      row("costly-fast", "cas_b", true, 50, 0.08),
+    ];
+    const stats = aggregateModelStats(results, ["cas_a", "cas_b"]);
+    const picked = pickNamedModel(stats, null);
+    assert.equal(picked.outcome, "named");
+    if (picked.outcome === "named") {
+      assert.equal(picked.winner, "cheap-slow");
+    }
+  });
+
+  it("backs up other undominated passers, not a model beaten on cost and time", () => {
+    const results = [
+      row("cheap-slow", "cas_a", true, 400, 0.01),
+      row("cheap-slow", "cas_b", true, 420, 0.01),
+      row("costly-fast", "cas_a", true, 40, 0.08),
+      row("costly-fast", "cas_b", true, 50, 0.08),
+      row("dominated", "cas_a", true, 500, 0.05),
+      row("dominated", "cas_b", true, 520, 0.05),
+    ];
+    const stats = aggregateModelStats(results, ["cas_a", "cas_b"]);
+    const picked = pickNamedModel(stats, null);
+    assert.equal(picked.outcome, "named");
+    if (picked.outcome === "named") {
+      assert.equal(picked.winner, "cheap-slow");
+      assert.ok(picked.backups.includes("costly-fast"));
+      assert.ok(!picked.backups.includes("dominated"));
+      assert.ok(picked.backups.length <= 2);
+    }
+  });
 });

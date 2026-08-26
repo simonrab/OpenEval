@@ -20,7 +20,12 @@ export const ASK_HUMAN = [
   "what good means",
   "open accept_url",
   "open mark_url",
+  "open approve_url",
   "none of the models passed; see failing_eval_ids",
+  "Pass a real prj_",
+  "Pass a saved ste_",
+  "Pass the saved named model",
+  "named model rejected; do not write it into config",
 ] as const;
 
 export type AskHuman = (typeof ASK_HUMAN)[number];
