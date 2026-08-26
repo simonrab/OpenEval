@@ -16,40 +16,20 @@
 </head>
 <body>
   <h1>Eval run report</h1>
-  <p class="meta" id="summary">Loading…</p>
+  <p class="meta">{{SUMMARY}}</p>
+  <h2>Models</h2>
+  <table>
+    <thead>
+      <tr><th>Model</th><th>Pass</th><th>Fail</th><th>Failing evals</th></tr>
+    </thead>
+    <tbody>{{MODEL_ROWS}}</tbody>
+  </table>
+  <h2>Evals</h2>
   <table>
     <thead>
       <tr><th>Eval</th><th>Result</th><th>Reason</th></tr>
     </thead>
-    <tbody id="rows"></tbody>
+    <tbody>{{EVAL_ROWS}}</tbody>
   </table>
-  <script>
-    const params = new URLSearchParams(location.search);
-    const runId = params.get("run_id");
-    const summary = document.getElementById("summary");
-    const rows = document.getElementById("rows");
-    if (!runId) {
-      summary.textContent = "Missing run_id query parameter.";
-    } else {
-      summary.textContent = "Run " + runId + " — open from get_eval_report report_url with project auth on the API.";
-      fetch("/v1/tools/get_eval_report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + (window.__EVALROUTER_KEY || "") },
-        body: JSON.stringify({ project_id: window.__EVALROUTER_PROJECT || "", run_id: runId })
-      }).then(r => r.json()).then(data => {
-        if (data.summary) {
-          summary.textContent = "Run " + data.summary.run_id + " — pass " + data.summary.n_pass + ", fail " + data.summary.n_fail + ", cost $" + data.summary.cost_usd.toFixed(4);
-          rows.innerHTML = "";
-          for (const item of data.items || []) {
-            const tr = document.createElement("tr");
-            tr.innerHTML = "<td>" + item.title + "</td><td class='" + (item.passed ? "pass" : "fail") + "'>" + (item.passed ? "pass" : "fail") + "</td><td>" + item.reason_short + "</td>";
-            rows.appendChild(tr);
-          }
-        }
-      }).catch(() => {
-        summary.textContent = "Run " + runId + " — use get_eval_report for details.";
-      });
-    }
-  </script>
 </body>
 </html>

@@ -18,6 +18,7 @@ export function isToolName(name: string): name is ToolName {
 
 export const ASK_HUMAN = [
   "what good means",
+  "open accept_url",
   "open mark_url",
   "none of the models passed; see failing_eval_ids",
 ] as const;

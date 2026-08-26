@@ -33,6 +33,20 @@ export type AppOptions = {
   baseUrl?: string;
 };
 
+export function deriveBaseUrl(env: {
+  EVALROUTER_BASE_URL?: string;
+  HOST?: string;
+  PORT?: string;
+}): string {
+  const explicit = env.EVALROUTER_BASE_URL?.trim();
+  if (explicit) {
+    return explicit.replace(/\/+$/, "");
+  }
+  const host = env.HOST?.trim() || "127.0.0.1";
+  const port = env.PORT?.trim() || "3000";
+  return `http://${host}:${port}`;
+}
+
 export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   const db = openDb(opts.sqlitePath);
   storeApiKeyHash(db, opts.apiKey);
@@ -56,7 +70,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   await registerAccept(app, db, opts.apiKey);
   await registerApprove(app, db, opts.apiKey);
   await registerMarkRoutes(app, db, opts.apiKey);
-  await registerReport(app);
+  await registerReport(app, db, opts.apiKey, baseUrl);
 
   await app.register(async (v1) => {
     v1.addHook("preHandler", createAuthHook(db));
@@ -76,14 +90,15 @@ async function main(): Promise<void> {
   }
 
   const sqlitePath = defaultSqlitePath();
+  const port = Number(process.env.PORT ?? 3000);
+  const host = process.env.HOST ?? "127.0.0.1";
   const app = await buildApp({
     sqlitePath,
     apiKey,
     logger: true,
+    baseUrl: deriveBaseUrl(process.env),
   });
 
-  const port = Number(process.env.PORT ?? 3000);
-  const host = process.env.HOST ?? "127.0.0.1";
   await app.listen({ port, host });
   app.log.info(`EvalRouter listening on ${host}:${port}`);
 }

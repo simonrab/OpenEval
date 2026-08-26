@@ -76,6 +76,16 @@ export function jsonObjectDrafts(opts: {
       input_truncated: input,
     },
     {
+      title: "total_cents is numeric",
+      score_how: "code",
+      status: "draft",
+      program_check: {
+        kind: "field_equals",
+        expected: { path: "total_cents", exists: true, type: "number" },
+      },
+      input_truncated: input,
+    },
+    {
       title: "Must not wrap JSON in markdown",
       score_how: "code",
       status: "draft",

@@ -1,3 +1,4 @@
+import type Database from "better-sqlite3";
 import { agentError, needMoreEvalsError, projectNotFoundError, suiteNotFoundError } from "../errors.js";
 import {
   getEvalSet,
@@ -8,6 +9,7 @@ import {
 import { newRecId } from "../ids.js";
 import { getJobLimits } from "../job.js";
 import { deriveWrapKey, projectExists, readSecret } from "../keys.js";
+import { buildReportUrl } from "../report-token.js";
 import { getRun, listRunResults } from "../runner/queue.js";
 import { hasEnoughTrustedEvals } from "../runner/worker.js";
 import { getOldTrustedEvalIds } from "../eval-set-copy.js";
@@ -349,7 +351,10 @@ export const handleRecommendModels: ToolHandler = async (body, ctx) => {
       p95: percentile(winnerTimes, 95),
     },
     cost_usd: winnerCost,
-    report_url: `${baseUrl}/report?run_id=${encodeURIComponent(input.run_id)}`,
+    report_url: buildReportUrl(baseUrl, ctx.apiKey ?? "", {
+      project_id: input.project_id,
+      run_id: input.run_id,
+    }),
     next_action: {
       tool: null,
       args: {},

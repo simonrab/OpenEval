@@ -258,6 +258,7 @@ export const generateEvalSuiteOutputSchema = z
         total: z.number().int(),
       })
       .strict(),
+    accept_url: z.string().nullable(),
     mark_url: z.string().nullable(),
     next_action: nextActionSchema,
   })
@@ -377,6 +378,16 @@ export const getEvalReportOutputSchema = z
     failing_eval_ids: z.array(z.string()),
     eval_ids_scored: z.array(z.string()),
     eval_ids_not_scored: z.array(z.string()),
+    models: z.array(
+      z
+        .object({
+          model_id: z.string(),
+          n_pass: z.number().int(),
+          n_fail: z.number().int(),
+          failing_eval_ids: z.array(z.string()),
+        })
+        .strict(),
+    ),
     items: z.array(
       z
         .object({

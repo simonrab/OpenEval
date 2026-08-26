@@ -15,10 +15,12 @@ import { newJobId, newProjectId } from "../ids.js";
 import { isJsonObjectJob, jsonObjectDrafts } from "../job-types/json_object.js";
 import { draftsFromWhatGoodMeans } from "../job-types/unknown.js";
 import { projectExists } from "../keys.js";
+import { buildAcceptUrl, signAcceptToken } from "../routes/accept.js";
 import {
   generateEvalSuiteOutputSchema,
   type generateEvalSuiteInputSchema,
 } from "./schema.js";
+import type { NextAction } from "./types.js";
 import type { ToolHandler } from "../dispatch.js";
 import type { z } from "zod";
 
@@ -79,6 +81,21 @@ function buildDrafts(input: GenerateInput): DraftEval[] | null {
     return drafts;
   }
   return null;
+}
+
+function nextActionForAcceptUrl(
+  acceptUrl: string,
+  afterAccept: { tool: string; args: Record<string, unknown> },
+): NextAction {
+  return {
+    tool: null,
+    args: {
+      accept_url: acceptUrl,
+      after_accept_tool: afterAccept.tool,
+      after_accept_args: afterAccept.args,
+    },
+    ask_human: "open accept_url",
+  };
 }
 
 export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
@@ -152,7 +169,12 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
         score_how: e.score_how,
         status: e.status,
       }));
-      const next = nextActionForSet(members, projectId, copied.newEvalSetId);
+      const afterAccept = nextActionForSet(members, projectId, copied.newEvalSetId);
+      const acceptUrl = buildAcceptUrl(
+        ctx.baseUrl ?? "http://127.0.0.1:3000",
+        copied.newEvalSetId,
+        signAcceptToken(ctx.apiKey ?? "", copied.newEvalSetId),
+      );
 
       const output = generateEvalSuiteOutputSchema.parse({
         project_id: projectId,
@@ -170,8 +192,9 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
           trusted: nTrusted,
           total: members.length,
         },
+        accept_url: acceptUrl,
         mark_url: null,
-        next_action: next,
+        next_action: nextActionForAcceptUrl(acceptUrl, afterAccept),
       });
 
       storeIdempotentResponse(
@@ -239,6 +262,11 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
       projectId,
       createdSet.evalSetId,
     );
+    const acceptUrl = buildAcceptUrl(
+      ctx.baseUrl ?? "http://127.0.0.1:3000",
+      createdSet.evalSetId,
+      signAcceptToken(ctx.apiKey ?? "", createdSet.evalSetId),
+    );
 
     const output = generateEvalSuiteOutputSchema.parse({
       project_id: projectId,
@@ -256,8 +284,9 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
         trusted: createdSet.evals.filter((e) => e.status === "trusted").length,
         total: createdSet.evals.length,
       },
+      accept_url: acceptUrl,
       mark_url: null,
-      next_action: next,
+      next_action: nextActionForAcceptUrl(acceptUrl, next),
     });
 
     storeIdempotentResponse(

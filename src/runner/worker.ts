@@ -25,6 +25,9 @@ export type WorkerOptions = {
   openRouter: OpenRouterClient;
 };
 
+const MODEL_CALL_FAILED = "model call failed";
+const MAX_MODEL_FAILURE_REASON_CHARS = 240;
+
 export function startWorker(opts: WorkerOptions): () => void {
   let stopped = false;
   let busy = false;
@@ -149,14 +152,14 @@ export async function processRun(opts: WorkerOptions, runId: string): Promise<vo
         content = result.content;
         timeMs = result.time_ms;
         costUsd = result.cost_usd;
-      } catch {
+      } catch (err) {
         await finishEvalSpend(gate, 0);
         insertRunResult(opts.db, {
           runId,
           evalId: ev.eval_id,
           modelId,
           passed: false,
-          reasonShort: "model call failed",
+          reasonShort: modelFailureReason(err),
           timeMs: 0,
           costUsd: 0,
         });
@@ -247,4 +250,22 @@ export function countTrustedCodeEvals(members: MemberEval[]): number {
   return members.filter(
     (m) => m.status === "trusted" && m.score_how === "code",
   ).length;
+}
+
+function modelFailureReason(err: unknown): string {
+  const message = err instanceof Error ? err.message : "";
+  if (!/^OpenRouter \d{3}:/.test(message)) {
+    return MODEL_CALL_FAILED;
+  }
+
+  const sanitized = message
+    .replace(/\s+/g, " ")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/\bsk-or-v1-[A-Za-z0-9_-]+\b/g, "[redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "[redacted]")
+    .trim();
+
+  return (
+    sanitized.slice(0, MAX_MODEL_FAILURE_REASON_CHARS) || MODEL_CALL_FAILED
+  );
 }

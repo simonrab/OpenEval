@@ -39,6 +39,17 @@ export function verifyAcceptToken(
   return timingSafeEqual(a, b);
 }
 
+export function buildAcceptUrl(
+  baseUrl: string,
+  evalSetId: string,
+  token: string,
+): string {
+  const url = new URL("/accept", baseUrl);
+  url.searchParams.set("eval_set_id", evalSetId);
+  url.searchParams.set("token", token);
+  return url.toString();
+}
+
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")

@@ -35,6 +35,7 @@ type GenerateSuccess = {
     trusted: number;
     total: number;
   };
+  accept_url: string | null;
   mark_url: string | null;
   next_action: {
     tool: string | null;
@@ -79,7 +80,7 @@ describe("generate_eval_suite (J1)", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("JSON-object job returns ste_, draft evals, counts, and next_action", async () => {
+  it("JSON-object job returns enough code drafts, accept_url, counts, and next_action", async () => {
     const res = await postGenerate(app, {
       description: DEMO_DESCRIPTION,
       idempotency_key: "idem-json-1",
@@ -106,15 +107,19 @@ describe("generate_eval_suite (J1)", () => {
     assert.equal(body.counts.trusted, 0);
     assert.equal(body.counts.total, body.n_code + body.n_person);
     assert.equal(body.n_draft, body.counts.total);
+    assert.equal(body.n_person, 0);
+    assert.ok(body.n_code >= 5);
+    assert.ok(body.accept_url);
+    assert.match(body.accept_url!, /\/accept\?eval_set_id=ste_/);
+    assert.match(body.accept_url!, /token=/);
     assert.ok("mark_url" in body);
+    assert.equal(body.mark_url, null);
     assert.ok(body.next_action);
     assert.ok("tool" in body.next_action);
-    if (body.n_person === 0) {
-      assert.equal(body.next_action.tool, "run_evals");
-      assert.equal(body.mark_url, null);
-    } else {
-      assert.equal(body.next_action.tool, "queue_for_labeling");
-    }
+    assert.equal(body.next_action.tool, null);
+    assert.equal(body.next_action.ask_human, "open accept_url");
+    assert.equal(body.next_action.args.accept_url, body.accept_url);
+    assert.equal(body.next_action.args.after_accept_tool, "run_evals");
   });
 
   it("creates a project when project_id is omitted", async () => {

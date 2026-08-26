@@ -249,6 +249,7 @@ describe("output schemas", () => {
       n_code: 8,
       n_person: 2,
       n_draft: 10,
+      accept_url: "https://example.invalid/accept?token=signed",
       counts: {
         draft: 10,
         code: 8,
@@ -257,7 +258,14 @@ describe("output schemas", () => {
         total: 10,
       },
       mark_url: null,
-      next_action: { tool: "run_evals", args: {}, ask_human: null },
+      next_action: {
+        tool: null,
+        args: {
+          accept_url: "https://example.invalid/accept?token=signed",
+          after_accept_tool: "queue_for_labeling",
+        },
+        ask_human: "open accept_url",
+      },
     });
     assert.equal(parsed.success, true);
   });
@@ -370,6 +378,14 @@ describe("output schemas", () => {
         failing_eval_ids: [],
         eval_ids_scored: ["cas_1"],
         eval_ids_not_scored: [],
+        models: [
+          {
+            model_id: "provider/model",
+            n_pass: 1,
+            n_fail: 0,
+            failing_eval_ids: [],
+          },
+        ],
         items: [
           {
             eval_id: "cas_1",

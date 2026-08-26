@@ -3,6 +3,7 @@ import { mapCiExit } from "../ci/exit.js";
 import { agentError, projectNotFoundError } from "../errors.js";
 import { getEvalSet, listMembers } from "../eval-set.js";
 import { projectExists } from "../keys.js";
+import { buildReportUrl } from "../report-token.js";
 import { getRun, listRunResults } from "../runner/queue.js";
 import type { ToolHandler } from "../dispatch.js";
 import {
@@ -35,6 +36,10 @@ function encodeCursor(offset: number): string {
   return String(offset);
 }
 
+function truncateReason(reason: string, max = 240): string {
+  return reason.length > max ? `${reason.slice(0, max - 3)}...` : reason;
+}
+
 function checkNewFailuresMissing(
   run: { new_failures: string | null },
   members: Array<{ input_truncated: string }>,
@@ -53,6 +58,7 @@ export function buildReport(
   db: Database.Database,
   input: ReportInput,
   baseUrl: string,
+  apiKey: string,
 ): { status: number; body: unknown } {
   if (!projectExists(db, input.project_id)) {
     return { status: 404, body: projectNotFoundError(input.project_id) };
@@ -94,6 +100,12 @@ export function buildReport(
 
   const limit = input.limit ?? 20;
   const offset = decodeCursor(input.cursor);
+  const modelIds = parseRunModels(run.models, results);
+  const modelSummaries = summarizeModelResults(
+    results,
+    trusted.map((m) => m.eval_id),
+    modelIds,
+  );
   const aggregated = aggregateResults(results, members);
   const page = aggregated.slice(offset, offset + limit);
   const nextOffset = offset + page.length;
@@ -178,6 +190,14 @@ export function buildReport(
   const namedModel = run.named_model
     ? (JSON.parse(run.named_model) as { rec_id: string; model_id: string })
     : null;
+  const namedModelSummary = namedModel
+    ? modelSummaries.find((m) => m.model_id === namedModel.model_id)
+    : null;
+  const namedModelStillPasses = namedModel
+    ? namedModelSummary != null &&
+      namedModelSummary.n_fail === 0 &&
+      namedModelSummary.n_pass === trusted.length
+    : null;
 
   const output = getEvalReportOutputSchema.parse({
     status: runStatus,
@@ -190,7 +210,7 @@ export function buildReport(
       n_fail: nFail,
       time_ms: { p50: percentile(times, 50), p95: percentile(times, 95) },
       cost_usd: costUsd,
-      named_model_still_passes: namedModel ? nFail === 0 : null,
+      named_model_still_passes: namedModelStillPasses,
       new_failures_missing_from_evals: newFailuresMissing,
       limits_ok: true,
     },
@@ -198,6 +218,7 @@ export function buildReport(
     failing_eval_ids: failingEvalIds,
     eval_ids_scored: scoredEvalIds.filter((id) => trustedIds.has(id)),
     eval_ids_not_scored: evalIdsNotScored,
+    models: modelSummaries,
     items: page.map((r) => ({
       eval_id: r.eval_id,
       title: r.title,
@@ -206,7 +227,10 @@ export function buildReport(
     })),
     next_cursor: hasMore ? encodeCursor(nextOffset) : null,
     truncated: hasMore,
-    report_url: `${baseUrl}/report?run_id=${encodeURIComponent(run.id)}`,
+    report_url: buildReportUrl(baseUrl, apiKey, {
+      project_id: input.project_id,
+      run_id: run.id,
+    }),
     live_traffic_changed: false,
     ci_exit: ciExit,
     next_action: {
@@ -219,6 +243,61 @@ export function buildReport(
   return { status: 200, body: output };
 }
 
+function parseRunModels(
+  raw: string,
+  results: ReturnType<typeof listRunResults>,
+): string[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      const modelIds = parsed.filter(
+        (value): value is string => typeof value === "string" && value.length > 0,
+      );
+      if (modelIds.length > 0) {
+        return [...new Set(modelIds)];
+      }
+    }
+  } catch {
+    // Fall through to results.
+  }
+  return [...new Set(results.map((r) => r.model_id))];
+}
+
+function summarizeModelResults(
+  results: ReturnType<typeof listRunResults>,
+  trustedEvalIds: string[],
+  modelIds: string[],
+): Array<{
+  model_id: string;
+  n_pass: number;
+  n_fail: number;
+  failing_eval_ids: string[];
+}> {
+  const trustedSet = new Set(trustedEvalIds);
+  return modelIds.map((modelId) => {
+    const rows = results.filter(
+      (r) => r.model_id === modelId && trustedSet.has(r.eval_id),
+    );
+    const passedIds = new Set(
+      rows.filter((r) => r.passed === 1).map((r) => r.eval_id),
+    );
+    const failedIds = new Set(
+      rows.filter((r) => r.passed !== 1).map((r) => r.eval_id),
+    );
+    for (const evalId of trustedEvalIds) {
+      if (!passedIds.has(evalId) && !failedIds.has(evalId)) {
+        failedIds.add(evalId);
+      }
+    }
+    return {
+      model_id: modelId,
+      n_pass: passedIds.size,
+      n_fail: failedIds.size,
+      failing_eval_ids: [...failedIds],
+    };
+  });
+}
+
 function aggregateResults(
   results: ReturnType<typeof listRunResults>,
   members: ReturnType<typeof listMembers>,
@@ -228,36 +307,54 @@ function aggregateResults(
   passed: boolean;
   reason_short: string;
 }> {
-  const byEval = new Map<
-    string,
-    { passed: boolean; reason_short: string; title: string }
-  >();
+  const byEval = new Map<string, ReturnType<typeof listRunResults>>();
   const titleById = new Map(members.map((m) => [m.eval_id, m.title]));
 
   for (const r of results) {
-    const prev = byEval.get(r.eval_id);
-    const passed = r.passed === 1;
-    if (!prev) {
-      byEval.set(r.eval_id, {
-        passed,
-        reason_short: r.reason_short,
-        title: titleById.get(r.eval_id) ?? r.eval_id,
-      });
-    } else if (!passed) {
-      byEval.set(r.eval_id, {
-        passed: false,
-        reason_short: r.reason_short,
-        title: prev.title,
-      });
+    if (!titleById.has(r.eval_id)) {
+      continue;
     }
+    const rows = byEval.get(r.eval_id) ?? [];
+    rows.push(r);
+    byEval.set(r.eval_id, rows);
   }
 
-  return [...byEval.entries()].map(([eval_id, v]) => ({
-    eval_id,
-    title: v.title,
-    passed: v.passed,
-    reason_short: v.reason_short,
-  }));
+  const out: Array<{
+    eval_id: string;
+    title: string;
+    passed: boolean;
+    reason_short: string;
+  }> = [];
+  for (const member of members) {
+    const rows = byEval.get(member.eval_id);
+    if (!rows || rows.length === 0) {
+      continue;
+    }
+    const passedRows = rows.filter((r) => r.passed === 1);
+    if (passedRows.length > 0) {
+      const failedRows = rows.filter((r) => r.passed !== 1);
+      const reason =
+        failedRows.length === 0
+          ? passedRows[0]!.reason_short
+          : `passed by ${passedRows.map((r) => r.model_id).join(", ")}; ${
+              failedRows.length
+            } model ${failedRows.length === 1 ? "miss" : "misses"}`;
+      out.push({
+        eval_id: member.eval_id,
+        title: member.title,
+        passed: true,
+        reason_short: truncateReason(reason),
+      });
+      continue;
+    }
+    out.push({
+      eval_id: member.eval_id,
+      title: member.title,
+      passed: false,
+      reason_short: truncateReason(rows[0]!.reason_short),
+    });
+  }
+  return out;
 }
 
 export const handleGetEvalReport: ToolHandler = (body, ctx) => {
@@ -266,5 +363,5 @@ export const handleGetEvalReport: ToolHandler = (body, ctx) => {
     throw new Error("get_eval_report requires db on ToolContext");
   }
   const baseUrl = ctx.baseUrl ?? "http://127.0.0.1:3000";
-  return buildReport(db, body as ReportInput, baseUrl);
+  return buildReport(db, body as ReportInput, baseUrl, ctx.apiKey ?? "");
 };
