@@ -455,6 +455,16 @@ v0 is done when requirements section 14 holds.
 
 ---
 
+## After M7
+
+Shipped after the v0 slices. These are not a rewrite of M7.
+
+- Retire an old eval: `generate_eval_suite` with `retire_eval_ids` copy-forwards to a new `ste_` and omits those `cas_` ids. History is not deleted.
+- Known job types: extract, tone, and image/PDF. Detection uses structural signals. Bare `"invoice"` is still not a known type.
+- Region mark on image/PDF when the job needs a location. Region is extra payload on the mark, not `form_type: "file"`.
+
+---
+
 ## 5. How not to paint into a corner
 
 1. **One dispatch.** HTTP and MCP call `dispatch(name, body)`. Register all seven names in slice 1. Fill handlers later. Slices 7–10 do not add a second MCP package.

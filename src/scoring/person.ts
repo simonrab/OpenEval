@@ -61,13 +61,9 @@ export function scoreTrustedPersonMark(
         if (choice === "fail") {
           return { passed: false, reason_short: `rubric ${check} fail` };
         }
-        if (
-          choice === "pass" &&
-          check.length > 0 &&
-          !output.toLowerCase().includes(check.toLowerCase())
-        ) {
-          return { passed: false, reason_short: `rubric ${check} missing` };
-        }
+      }
+      if (mustNever && output.toLowerCase().includes(mustNever.toLowerCase())) {
+        return { passed: false, reason_short: "must_never hit" };
       }
       return { passed: true, reason_short: "rubric pass" };
     }

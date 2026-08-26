@@ -77,4 +77,51 @@ describe("mark agreement (J3)", () => {
     };
     assert.equal(marksAgree(a, b).agree, false);
   });
+
+  it("regions within tolerance agree", () => {
+    const a: MarkPayload = {
+      form_type: "pass_fail",
+      pass_fail: "pass",
+      region: { x: 10, y: 10, width: 40, height: 20 },
+    };
+    const b: MarkPayload = {
+      form_type: "pass_fail",
+      pass_fail: "pass",
+      region: { x: 14, y: 12, width: 40, height: 20 },
+    };
+    assert.deepEqual(
+      marksAgree(a, b, { needs_region: true, region_tolerance: 8 }),
+      { agree: true },
+    );
+  });
+
+  it("regions outside tolerance disagree", () => {
+    const a: MarkPayload = {
+      form_type: "pass_fail",
+      pass_fail: "pass",
+      region: { x: 10, y: 10, width: 40, height: 20 },
+    };
+    const b: MarkPayload = {
+      form_type: "pass_fail",
+      pass_fail: "pass",
+      region: { x: 40, y: 10, width: 40, height: 20 },
+    };
+    const result = marksAgree(a, b, {
+      needs_region: true,
+      region_tolerance: 8,
+    });
+    assert.equal(result.agree, false);
+  });
+
+  it("ignores region when the job does not need a location", () => {
+    const a: MarkPayload = {
+      form_type: "pass_fail",
+      pass_fail: "pass",
+    };
+    const b: MarkPayload = {
+      form_type: "pass_fail",
+      pass_fail: "pass",
+    };
+    assert.deepEqual(marksAgree(a, b, { needs_region: false }), { agree: true });
+  });
 });

@@ -8,11 +8,13 @@ import { createAuthHook, storeApiKeyHash } from "./auth.js";
 import { defaultSqlitePath, openDb } from "./db.js";
 import { registerAccept } from "./routes/accept.js";
 import { registerApprove } from "./routes/approve.js";
+import { registerCompileApprove } from "./routes/compile-approve.js";
 import { registerMarkRoutes } from "./mark/app.js";
 import { registerHealth } from "./routes/health.js";
 import { registerKeys } from "./routes/keys.js";
 import { registerProjects } from "./routes/projects.js";
 import { registerReport } from "./routes/report.js";
+import { registerRuntimePolicies } from "./routes/runtime-policies.js";
 import { registerTools } from "./routes/tools.js";
 import {
   createOpenRouterClient,
@@ -69,6 +71,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   await registerHealth(app);
   await registerAccept(app, db, opts.apiKey);
   await registerApprove(app, db, opts.apiKey);
+  await registerCompileApprove(app, db, opts.apiKey);
   await registerMarkRoutes(app, db, opts.apiKey);
   await registerReport(app, db, opts.apiKey, baseUrl);
 
@@ -76,6 +79,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     v1.addHook("preHandler", createAuthHook(db));
     await registerProjects(v1, db);
     await registerKeys(v1, db, opts.apiKey);
+    await registerRuntimePolicies(v1, db, opts.apiKey);
     await registerTools(v1, db, { baseUrl, apiKey: opts.apiKey, openRouter });
   }, { prefix: "/v1" });
 

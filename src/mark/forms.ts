@@ -14,6 +14,8 @@ export type FormRenderMeta = {
   rubricDefaults: Record<string, PassFailChoice>;
   toolNameDefault: string;
   toolArgsDefault: string;
+  needsRegion: boolean;
+  regionTolerance: number;
 };
 
 function emptyFormRenderMeta(): FormRenderMeta {
@@ -24,6 +26,8 @@ function emptyFormRenderMeta(): FormRenderMeta {
     rubricDefaults: {},
     toolNameDefault: "",
     toolArgsDefault: "{}",
+    needsRegion: false,
+    regionTolerance: 8,
   };
 }
 
@@ -104,8 +108,22 @@ export function parseFormRenderMeta(
     meta.rubricNames = ["quality"];
   }
 
+  if (spec?.needs_region === true) {
+    meta.needsRegion = true;
+  }
+  if (typeof spec?.region_tolerance === "number" && Number.isFinite(spec.region_tolerance)) {
+    meta.regionTolerance = spec.region_tolerance;
+  }
+
   return meta;
 }
+
+export type MarkRegion = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 export type MarkPayload = {
   form_type: MarkFormType;
@@ -115,6 +133,7 @@ export type MarkPayload = {
   fields?: Record<string, string>;
   expected_text?: string;
   tool?: { name: string; args: Record<string, unknown> };
+  region?: MarkRegion;
 };
 
 export type CannotMarkPayload = {
@@ -184,7 +203,38 @@ export function normalizeMarkPayload(payload: MarkPayload): MarkPayload {
       args: { ...payload.tool.args },
     };
   }
+  if (payload.region != null) {
+    out.region = { ...payload.region };
+  }
   return out;
+}
+
+export function parseRegionFromBody(
+  body: Record<string, unknown>,
+): MarkRegion | undefined {
+  const asNum = (value: unknown): number | null => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+      const n = Number(value);
+      if (Number.isFinite(n)) {
+        return n;
+      }
+    }
+    return null;
+  };
+  const x = asNum(body.region_x);
+  const y = asNum(body.region_y);
+  const width = asNum(body.region_width);
+  const height = asNum(body.region_height);
+  if (x == null || y == null || width == null || height == null) {
+    return undefined;
+  }
+  if (width <= 0 || height <= 0) {
+    return undefined;
+  }
+  return { x, y, width, height };
 }
 
 export function markFromFormBody(
@@ -261,6 +311,11 @@ export function markFromFormBody(
 
   if (typeof body.why === "string" && body.why.length > 0) {
     payload.why = body.why;
+  }
+
+  const region = parseRegionFromBody(body);
+  if (region) {
+    payload.region = region;
   }
 
   return payload;

@@ -184,3 +184,30 @@ CREATE TABLE IF NOT EXISTS eval_files (
   PRIMARY KEY (eval_id, path),
   FOREIGN KEY (eval_id) REFERENCES evals(id)
 );
+
+-- Live L0: signed policy documents. Do not update a published row.
+CREATE TABLE IF NOT EXISTS policies (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  body_json TEXT NOT NULL,
+  etag TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES projects(id)
+);
+
+-- Live L1: last full vs draft. GET serves last full only.
+CREATE TABLE IF NOT EXISTS project_live_state (
+  project_id TEXT PRIMARY KEY,
+  last_full_policy_id TEXT,
+  draft_policy_id TEXT,
+  FOREIGN KEY (project_id) REFERENCES projects(id),
+  FOREIGN KEY (last_full_policy_id) REFERENCES policies(id),
+  FOREIGN KEY (draft_policy_id) REFERENCES policies(id)
+);
+
+CREATE TABLE IF NOT EXISTS policy_approvals (
+  policy_id TEXT PRIMARY KEY,
+  decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')),
+  decided_at TEXT NOT NULL,
+  FOREIGN KEY (policy_id) REFERENCES policies(id)
+);

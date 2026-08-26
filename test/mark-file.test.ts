@@ -308,8 +308,8 @@ describe("register_failure file content on mark screen", () => {
       eval_id: originalPerson,
       token: markToken,
       action: "submit",
-      pass_fail: "pass",
-      expected_text: "ok",
+      rubric_tone: "pass",
+      rubric_length: "pass",
     };
     await app.inject({
       method: "POST",

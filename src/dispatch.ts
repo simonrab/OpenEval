@@ -1,4 +1,5 @@
 import { agentError } from "./errors.js";
+import { handleCompilePolicy } from "./tools/compile_policy.js";
 import { handleGenerateEvalSuite } from "./tools/generate_eval_suite.js";
 import { handleGetEvalReport } from "./tools/get_eval_report.js";
 import { handleGetLabelStatus } from "./tools/get_label_status.js";
@@ -46,6 +47,7 @@ handlers.set("run_evals", handleRunEvals);
 handlers.set("get_eval_report", handleGetEvalReport);
 handlers.set("recommend_models", handleRecommendModels);
 handlers.set("register_failure", handleRegisterFailure);
+handlers.set("compile_policy", handleCompilePolicy);
 
 function unknownToolError() {
   return agentError({

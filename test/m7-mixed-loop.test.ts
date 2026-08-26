@@ -114,7 +114,8 @@ describe("M7 mixed-job loop", () => {
       eval_id: personEvalId,
       token: markToken,
       action: "submit",
-      pass_fail: "pass",
+      rubric_tone: "pass",
+      rubric_length: "pass",
     };
     const markA = await app.inject({
       method: "POST",

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Compile approve</title>
+  <style>
+    body { font-family: sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+    .meta { color: #444; font-size: 0.9rem; }
+    button { margin-top: 1rem; padding: 0.4rem 0.8rem; margin-right: 0.5rem; }
+    dl { display: grid; grid-template-columns: 8rem 1fr; gap: 0.25rem 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Compile approve</h1>
+  <p>This page shows a compiled policy. Approve does not rewrite the prompt.</p>
+  <p>The compile tool does not change live traffic. live_traffic_changed stays false.</p>
+  {{BANNER}}
+  <dl>
+    <dt>Policy</dt><dd>{{POLICY_ID}}</dd>
+    <dt>Primary</dt><dd>{{PRIMARY}}</dd>
+    <dt>Backups</dt><dd>{{BACKUPS}}</dd>
+    <dt>Recommendation</dt><dd>{{REC_ID}}</dd>
+    <dt>Eval set</dt><dd>{{STE_ID}}</dd>
+  </dl>
+  <form method="post" action="/compile-approve">
+    <input type="hidden" name="policy_id" value="{{POLICY_ID}}">
+    <input type="hidden" name="token" value="{{TOKEN}}">
+    <button type="submit" name="decision" value="approved">Approve</button>
+    <button type="submit" name="decision" value="rejected">Reject</button>
+  </form>
+</body>
+</html>

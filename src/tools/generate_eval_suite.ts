@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { jobUnclearError, projectNotFoundError, suiteNotFoundError } from "../errors.js";
+import { invalidInputError, jobUnclearError, projectNotFoundError, suiteNotFoundError } from "../errors.js";
 import { copyEvalSetForward } from "../eval-set-copy.js";
 import {
   createEvalSetVersion1,
@@ -13,7 +13,10 @@ import {
 } from "../eval-set.js";
 import { attachImagePdfFiles } from "../eval-files.js";
 import { newJobId, newProjectId } from "../ids.js";
+import { extractDrafts, isExtractJob } from "../job-types/extract.js";
+import { imagePdfDrafts, isImagePdfJob } from "../job-types/image_pdf.js";
 import { isJsonObjectJob, jsonObjectDrafts } from "../job-types/json_object.js";
+import { isToneJob, toneDrafts } from "../job-types/tone.js";
 import {
   draftsFromWhatGoodMeans,
   hasPersonSignals,
@@ -93,20 +96,37 @@ function mergePersonDrafts(
 function buildDrafts(input: GenerateInput): DraftEval[] | null {
   const description = input.description;
   const sampleFiles = input.sample_files;
+  const extras = {
+    needs_images: input.limits?.needs_images,
+    sampleFiles,
+  };
+  const drafts: DraftEval[] = [];
   if (isJsonObjectJob(description)) {
-    return mergePersonDrafts(
-      jsonObjectDrafts({
+    drafts.push(
+      ...jsonObjectDrafts({
         description: description ?? "",
         sampleFiles,
       }),
-      input,
     );
   }
+  if (isExtractJob(description)) {
+    drafts.push(...extractDrafts({ description: description ?? "" }));
+  }
+  if (isImagePdfJob(description, extras)) {
+    drafts.push(...imagePdfDrafts({ description: description ?? "" }));
+  }
+  const toneText = description ?? personSignalText(input);
+  if (isToneJob(description) || isToneJob(toneText)) {
+    drafts.push(...toneDrafts({ description: toneText }));
+  }
+  if (drafts.length > 0) {
+    return mergePersonDrafts(drafts, input);
+  }
   if (input.what_good_means != null) {
-    const drafts = draftsFromWhatGoodMeans(input.what_good_means);
+    const wgm = draftsFromWhatGoodMeans(input.what_good_means);
     if (sampleFiles && sampleFiles.length > 0) {
       for (const file of sampleFiles) {
-        drafts.push({
+        wgm.push({
           title: `Sample ${file.path}`,
           score_how: "code",
           status: "draft",
@@ -115,7 +135,7 @@ function buildDrafts(input: GenerateInput): DraftEval[] | null {
         });
       }
     }
-    return drafts;
+    return wgm;
   }
   return null;
 }
@@ -152,7 +172,9 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
   }
 
   const intent = input.intent ?? "new_feature";
-  if (intent === "add_feature") {
+  const retireIds = input.retire_eval_ids ?? [];
+  const retiring = retireIds.length > 0;
+  if (intent === "add_feature" || retiring) {
     const sourceEvalSetId = input.eval_set_id!;
     const sourceSet = getEvalSet(db, sourceEvalSetId);
     if (!sourceSet) {
@@ -172,16 +194,29 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
     }
 
     const draftsRaw = buildDrafts(input);
-    if (draftsRaw == null || draftsRaw.length === 0) {
+    if ((draftsRaw == null || draftsRaw.length === 0) && !retiring) {
       return { status: 400, body: jobUnclearError() };
     }
-    const drafts = capDrafts(draftsRaw, input.size);
+    const drafts = capDrafts(draftsRaw ?? [], input.size);
+
+    const sourceIds = new Set(
+      listMembers(db, sourceEvalSetId).map((m) => m.eval_id),
+    );
+    for (const id of retireIds) {
+      if (!sourceIds.has(id)) {
+        return {
+          status: 400,
+          body: invalidInputError(`Unknown eval id ${id}`),
+        };
+      }
+    }
 
     let copied;
     try {
       copied = copyEvalSetForward(db, {
         projectId,
         sourceEvalSetId,
+        omitEvalIds: retireIds,
       });
     } catch {
       return { status: 404, body: suiteNotFoundError(sourceEvalSetId) };

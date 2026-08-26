@@ -38,6 +38,18 @@ describe("error codes", () => {
   it("includes UNKNOWN_TOOL for an unknown name", () => {
     assert.equal(ErrorCode.UNKNOWN_TOOL, "UNKNOWN_TOOL");
   });
+
+  it("includes NO_LAST_KNOWN_POLICY for Live GET", () => {
+    assert.equal(ErrorCode.NO_LAST_KNOWN_POLICY, "NO_LAST_KNOWN_POLICY");
+    assert.ok(ERROR_CODES.includes("NO_LAST_KNOWN_POLICY"));
+  });
+
+  it("includes REC_NOT_APPROVED and STE_MISMATCH for Live compile", () => {
+    assert.equal(ErrorCode.REC_NOT_APPROVED, "REC_NOT_APPROVED");
+    assert.ok(ERROR_CODES.includes("REC_NOT_APPROVED"));
+    assert.equal(ErrorCode.STE_MISMATCH, "STE_MISMATCH");
+    assert.ok(ERROR_CODES.includes("STE_MISMATCH"));
+  });
 });
 
 describe("agent error envelope", () => {

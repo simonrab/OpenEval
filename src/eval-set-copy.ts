@@ -29,6 +29,7 @@ export function copyEvalSetForward(
   opts: {
     projectId: string;
     sourceEvalSetId: string;
+    omitEvalIds?: string[];
   },
 ): CopyEvalSetResult {
   const source = db
@@ -51,7 +52,10 @@ export function copyEvalSetForward(
        ORDER BY e.created_at ASC, e.id ASC`,
     )
     .all(opts.sourceEvalSetId) as Array<{ eval_id: string }>;
-  const oldEvalIds = memberRows.map((r) => r.eval_id);
+  const omit = new Set(opts.omitEvalIds ?? []);
+  const oldEvalIds = memberRows
+    .map((r) => r.eval_id)
+    .filter((id) => !omit.has(id));
 
   const nextEvalSetId = newEvalSetId();
   const createdAt = new Date().toISOString();
@@ -78,12 +82,16 @@ export function copyEvalSetForward(
       insertMember.run(nextEvalSetId, evalId);
     }
 
-    db.prepare(
-      `INSERT INTO marks (eval_set_id, eval_id, person_id, mark_json, is_third, created_at)
-       SELECT ?, eval_id, person_id, mark_json, is_third, created_at
-       FROM marks
-       WHERE eval_set_id = ?`,
-    ).run(nextEvalSetId, opts.sourceEvalSetId);
+    if (oldEvalIds.length > 0) {
+      const placeholders = oldEvalIds.map(() => "?").join(", ");
+      db.prepare(
+        `INSERT INTO marks (eval_set_id, eval_id, person_id, mark_json, is_third, created_at)
+         SELECT ?, eval_id, person_id, mark_json, is_third, created_at
+         FROM marks
+         WHERE eval_set_id = ?
+           AND eval_id IN (${placeholders})`,
+      ).run(nextEvalSetId, opts.sourceEvalSetId, ...oldEvalIds);
+    }
   });
   tx();
 

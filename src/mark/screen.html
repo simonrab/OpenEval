@@ -11,6 +11,10 @@
     label { display: block; margin: 0.35rem 0; }
     button { margin-top: 1rem; padding: 0.4rem 0.8rem; margin-right: 0.5rem; }
     textarea { width: 100%; min-height: 4rem; }
+    img { max-width: 100%; }
+    .region-mark { position: relative; display: inline-block; }
+    .region-overlay { position: absolute; border: 2px solid #c00; background: rgba(204,0,0,0.15); pointer-events: none; }
+    .region-fields label { display: inline-block; margin-right: 0.75rem; }
   </style>
 </head>
 <body>
@@ -30,6 +34,7 @@
   </section>
   {{DRAFT_SECTION}}
   <form method="post" action="/mark">
+    {{REGION_SECTION}}
     <input type="hidden" name="eval_set_id" value="{{EVAL_SET_ID}}">
     <input type="hidden" name="eval_id" value="{{EVAL_ID}}">
     <input type="hidden" name="token" value="{{TOKEN}}">

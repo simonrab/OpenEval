@@ -54,6 +54,62 @@ export function projectNotFoundError(projectId: string): AgentError {
   });
 }
 
+export function noLastKnownPolicyError(projectId: string): AgentError {
+  return agentError({
+    code: ErrorCode.NO_LAST_KNOWN_POLICY,
+    message: "This project has no last-known policy.",
+    retryable: false,
+    suggested_tool: "compile_policy",
+    suggested_args: { project_id: projectId },
+    next_action: {
+      tool: "compile_policy",
+      args: { project_id: projectId },
+      ask_human: null,
+    },
+  });
+}
+
+export function recNotApprovedError(recommendationId: string): AgentError {
+  return agentError({
+    code: ErrorCode.REC_NOT_APPROVED,
+    message: "No person approved this recommendation.",
+    retryable: false,
+    suggested_tool: null,
+    suggested_args: { recommendation_id: recommendationId },
+    next_action: {
+      tool: null,
+      args: { recommendation_id: recommendationId },
+      ask_human: "open approve_url",
+    },
+  });
+}
+
+export function steMismatchError(args: {
+  project_id: string;
+  recommendation_id: string;
+  eval_set_id: string;
+}): AgentError {
+  return agentError({
+    code: ErrorCode.STE_MISMATCH,
+    message: "The eval set is not the eval set on this recommendation.",
+    retryable: true,
+    suggested_tool: "compile_policy",
+    suggested_args: {
+      project_id: args.project_id,
+      recommendation_id: args.recommendation_id,
+      eval_set_id: args.eval_set_id,
+    },
+    next_action: {
+      tool: "compile_policy",
+      args: {
+        project_id: args.project_id,
+        recommendation_id: args.recommendation_id,
+      },
+      ask_human: null,
+    },
+  });
+}
+
 export function suiteNotFoundError(evalSetId: string): AgentError {
   return agentError({
     code: ErrorCode.SUITE_NOT_FOUND,
@@ -137,6 +193,20 @@ export function costCapExceededError(runId: string): AgentError {
       args: { run_id: runId },
       ask_human: null,
     },
+  });
+}
+
+export function invalidInputError(
+  message: string,
+  tool: ToolName = "generate_eval_suite",
+): AgentError {
+  return agentError({
+    code: ErrorCode.INVALID_INPUT,
+    message,
+    retryable: true,
+    suggested_tool: tool,
+    suggested_args: {},
+    next_action: { tool, args: {}, ask_human: null },
   });
 }
 

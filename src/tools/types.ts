@@ -8,6 +8,7 @@ export const TOOL_NAMES = [
   "recommend_models",
   "register_failure",
   "get_eval_report",
+  "compile_policy",
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -45,6 +46,9 @@ export const ErrorCode = {
   UNKNOWN_TOOL: "UNKNOWN_TOOL",
   INVALID_INPUT: "INVALID_INPUT",
   IDEMPOTENCY_KEY_REQUIRED: "IDEMPOTENCY_KEY_REQUIRED",
+  NO_LAST_KNOWN_POLICY: "NO_LAST_KNOWN_POLICY",
+  REC_NOT_APPROVED: "REC_NOT_APPROVED",
+  STE_MISMATCH: "STE_MISMATCH",
 } as const;
 
 export type ErrorCodeName = (typeof ErrorCode)[keyof typeof ErrorCode];

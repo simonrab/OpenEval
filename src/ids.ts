@@ -35,3 +35,7 @@ export function newRecId(): string {
 export function newPersonId(): string {
   return newId("per_");
 }
+
+export function newPolicyId(): string {
+  return newId("pol_");
+}

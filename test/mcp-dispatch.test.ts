@@ -107,6 +107,13 @@ function validInput(name: (typeof TOOL_NAMES)[number]): Record<string, unknown> 
       };
     case "get_eval_report":
       return { project_id: "prj_1", run_id: "run_1" };
+    case "compile_policy":
+      return {
+        project_id: "prj_1",
+        recommendation_id: "rec_1",
+        eval_set_id: "ste_1",
+        idempotency_key: "idem-mcp-1",
+      };
   }
 }
 
@@ -137,8 +144,21 @@ async function postViaMcpClient(
 }
 
 describe("MCP tool registry", () => {
-  it("registers all seven tools with non-empty schemas", () => {
-    assert.equal(MCP_TOOLS.length, 7);
+  it("registers v0 seven tools and compile_policy with non-empty schemas", () => {
+    assert.equal(MCP_TOOLS.length, 8);
+    const v0 = [
+      "generate_eval_suite",
+      "queue_for_labeling",
+      "get_label_status",
+      "run_evals",
+      "recommend_models",
+      "register_failure",
+      "get_eval_report",
+    ];
+    for (const name of v0) {
+      assert.ok(MCP_TOOLS.find((t) => t.name === name), `missing MCP tool ${name}`);
+    }
+    assert.ok(MCP_TOOLS.find((t) => t.name === "compile_policy"));
     for (const name of TOOL_NAMES) {
       const tool = MCP_TOOLS.find((t) => t.name === name);
       assert.ok(tool, `missing MCP tool ${name}`);

@@ -315,4 +315,124 @@ describe("generate_eval_suite (J1)", () => {
     assert.equal(page.statusCode, 200);
     assert.match(page.body, /<img/);
   });
+
+  it("extract with named fields yields field_equals code drafts", async () => {
+    const res = await postGenerate(app, {
+      description: "Extract named fields vendor and total from the document",
+      idempotency_key: "idem-extract-named",
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as GenerateSuccess;
+    assert.ok(body.n_code > 0);
+    const db = new Database(sqlitePath, { readonly: true });
+    try {
+      const rows = db
+        .prepare(
+          `SELECT e.program_check FROM eval_set_members m
+           JOIN evals e ON e.id = m.eval_id WHERE m.eval_set_id = ?`,
+        )
+        .all(body.eval_set_id) as Array<{ program_check: string | null }>;
+      const paths = rows
+        .map((r) =>
+          r.program_check
+            ? (JSON.parse(r.program_check) as { kind?: string; expected?: { path?: string } })
+            : null,
+        )
+        .filter((p) => p?.kind === "field_equals")
+        .map((p) => p?.expected?.path);
+      assert.ok(paths.includes("vendor"));
+      assert.ok(paths.includes("total"));
+    } finally {
+      db.close();
+    }
+  });
+
+  it("bare invoice still returns JOB_UNCLEAR without what_good_means", async () => {
+    const res = await postGenerate(app, {
+      description: "invoice",
+      idempotency_key: "idem-bare-invoice",
+    });
+    assert.ok(res.statusCode >= 400 && res.statusCode < 500);
+    assert.equal(isAgentError(res.json()), true);
+    assert.equal((res.json() as { code: string }).code, ErrorCode.JOB_UNCLEAR);
+  });
+
+  it("tone-only description yields person drafts and no fake JSON suite", async () => {
+    const res = await postGenerate(app, {
+      description: "Write a warm friendly good reply to the customer",
+      idempotency_key: "idem-tone-only",
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as GenerateSuccess;
+    assert.ok(body.n_person > 0);
+    assert.equal(body.n_code, 0);
+    assert.equal(body.next_action.args.after_accept_tool, "queue_for_labeling");
+    const db = new Database(sqlitePath, { readonly: true });
+    try {
+      const rows = db
+        .prepare(
+          `SELECT e.form_type, e.program_check FROM eval_set_members m
+           JOIN evals e ON e.id = m.eval_id WHERE m.eval_set_id = ?`,
+        )
+        .all(body.eval_set_id) as Array<{
+        form_type: string | null;
+        program_check: string | null;
+      }>;
+      assert.ok(rows.some((r) => r.form_type === "rubric"));
+      assert.ok(rows.every((r) => r.program_check == null));
+    } finally {
+      db.close();
+    }
+  });
+
+  it("image sample PNG plus judgment yields person eval with file bytes", async () => {
+    const pngB64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const res = await postGenerate(app, {
+      description: "Judge whether this invoice photo is readable",
+      sample_files: [{ path: "fixtures/invoice.png", content: pngB64 }],
+      idempotency_key: "idem-image-judge",
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as GenerateSuccess;
+    assert.ok(body.n_person > 0);
+
+    const db = new Database(sqlitePath);
+    const person = db
+      .prepare(
+        `SELECT e.id FROM eval_set_members m JOIN evals e ON e.id = m.eval_id
+         WHERE m.eval_set_id = ? AND e.score_how = 'person' LIMIT 1`,
+      )
+      .get(body.eval_set_id) as { id: string };
+    const file = db
+      .prepare(`SELECT path, content FROM eval_files WHERE eval_id = ?`)
+      .get(person.id) as { path: string; content: Buffer } | undefined;
+    db.close();
+    assert.ok(file);
+    assert.equal(file.path, "fixtures/invoice.png");
+    const bytes = Buffer.isBuffer(file.content)
+      ? file.content
+      : Buffer.from(file.content ?? []);
+    assert.ok(bytes.length > 0);
+
+    const queued = await app.inject({
+      method: "POST",
+      url: "/v1/tools/queue_for_labeling",
+      headers: authHeaders(),
+      payload: {
+        project_id: body.project_id,
+        eval_set_id: body.eval_set_id,
+        idempotency_key: "idem-image-judge-queue",
+      },
+    });
+    assert.equal(queued.statusCode, 200);
+    const token = signMarkToken(apiKey, body.eval_set_id);
+    const page = await app.inject({
+      method: "GET",
+      url: `/mark?eval_set_id=${encodeURIComponent(body.eval_set_id)}&token=${token}`,
+    });
+    assert.equal(page.statusCode, 200);
+    assert.match(page.body, /<img/);
+    assert.doesNotMatch(page.body, /form_type": "file"/);
+  });
 });

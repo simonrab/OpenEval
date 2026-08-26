@@ -13,12 +13,21 @@ export type ProgramCheck = {
   expected: unknown;
 };
 
+export type DraftFormType =
+  | "pass_fail"
+  | "rubric"
+  | "fields"
+  | "text"
+  | "tool";
+
 export type DraftEval = {
   title: string;
   score_how: "code" | "person";
   status: "draft";
   program_check: ProgramCheck | null;
   input_truncated: string;
+  form_type?: DraftFormType;
+  form_spec?: Record<string, unknown>;
 };
 
 export type StoredEval = {
@@ -100,8 +109,9 @@ export function createEvalSetVersion1(
   const evals: StoredEval[] = [];
   const insertEval = db.prepare(
     `INSERT INTO evals
-      (id, title, score_how, status, program_check, input_truncated, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      (id, title, score_how, status, program_check, input_truncated,
+       form_type, form_spec, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertMember = db.prepare(
     `INSERT INTO eval_set_members (eval_set_id, eval_id) VALUES (?, ?)`,
@@ -116,6 +126,8 @@ export function createEvalSetVersion1(
       draft.status,
       draft.program_check ? JSON.stringify(draft.program_check) : null,
       draft.input_truncated,
+      draft.form_type ?? null,
+      draft.form_spec ? JSON.stringify(draft.form_spec) : null,
       createdAt,
     );
     insertMember.run(evalSetId, evalId);
@@ -139,8 +151,9 @@ export function insertDraftEvals(
   const evals: StoredEval[] = [];
   const insertEval = db.prepare(
     `INSERT INTO evals
-      (id, title, score_how, status, program_check, input_truncated, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      (id, title, score_how, status, program_check, input_truncated,
+       form_type, form_spec, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertMember = db.prepare(
     `INSERT INTO eval_set_members (eval_set_id, eval_id) VALUES (?, ?)`,
@@ -155,6 +168,8 @@ export function insertDraftEvals(
       draft.status,
       draft.program_check ? JSON.stringify(draft.program_check) : null,
       draft.input_truncated,
+      draft.form_type ?? null,
+      draft.form_spec ? JSON.stringify(draft.form_spec) : null,
       createdAt,
     );
     insertMember.run(evalSetId, evalId);

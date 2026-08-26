@@ -185,6 +185,11 @@ function formatMarkSummary(mark: StoredMark): string {
   if (payload.tool) {
     parts.push(`tool: ${payload.tool.name}`);
   }
+  if (payload.region) {
+    parts.push(
+      `region: ${payload.region.x},${payload.region.y} ${payload.region.width}x${payload.region.height}`,
+    );
+  }
   return escapeHtml(parts.join(" · "));
 }
 
@@ -203,6 +208,7 @@ function fileSectionHtml(
   evalSetId: string,
   evalId: string,
   token: string,
+  needsRegion: boolean,
 ): string {
   if (files.length === 0) {
     return "";
@@ -216,9 +222,79 @@ function fileSectionHtml(
       if (file.mime === "application/pdf") {
         return `<embed src="${escapeHtml(src)}" type="application/pdf" width="100%" height="360" />`;
       }
-      return `<img src="${escapeHtml(src)}" alt="${escapeHtml(file.path)}" />`;
+      const img = `<img src="${escapeHtml(src)}" alt="${escapeHtml(file.path)}" />`;
+      if (!needsRegion) {
+        return img;
+      }
+      return `<div class="region-mark">${img}<div class="region-overlay" hidden></div></div>`;
     })
     .join("\n");
+}
+
+function regionSectionHtml(needsRegion: boolean): string {
+  if (!needsRegion) {
+    return "";
+  }
+  return `<fieldset class="region-fields">
+  <legend>Region on the image (pixel space)</legend>
+  <label>x <input type="number" name="region_x" required></label>
+  <label>y <input type="number" name="region_y" required></label>
+  <label>width <input type="number" name="region_width" required></label>
+  <label>height <input type="number" name="region_height" required></label>
+  <p class="meta">Drag on the image to set the box, or type the numbers.</p>
+</fieldset>
+<script>
+(function () {
+  var wrap = document.querySelector(".region-mark");
+  var img = wrap && wrap.querySelector("img");
+  var overlay = wrap && wrap.querySelector(".region-overlay");
+  var ix = document.querySelector("[name=region_x]");
+  var iy = document.querySelector("[name=region_y]");
+  var iw = document.querySelector("[name=region_width]");
+  var ih = document.querySelector("[name=region_height]");
+  if (!img || !overlay || !ix || !iy || !iw || !ih) return;
+  function paint() {
+    var x = Number(ix.value), y = Number(iy.value), w = Number(iw.value), h = Number(ih.value);
+    if (!(w > 0 && h > 0) || !img.naturalWidth) { overlay.hidden = true; return; }
+    var sx = img.clientWidth / img.naturalWidth;
+    var sy = img.clientHeight / img.naturalHeight;
+    overlay.style.left = (x * sx) + "px";
+    overlay.style.top = (y * sy) + "px";
+    overlay.style.width = (w * sx) + "px";
+    overlay.style.height = (h * sy) + "px";
+    overlay.hidden = false;
+  }
+  ["input", "change"].forEach(function (ev) {
+    ix.addEventListener(ev, paint);
+    iy.addEventListener(ev, paint);
+    iw.addEventListener(ev, paint);
+    ih.addEventListener(ev, paint);
+  });
+  var start = null;
+  img.addEventListener("mousedown", function (e) {
+    var r = img.getBoundingClientRect();
+    start = { x: e.clientX - r.left, y: e.clientY - r.top };
+    e.preventDefault();
+  });
+  window.addEventListener("mouseup", function (e) {
+    if (!start || !img.naturalWidth) return;
+    var r = img.getBoundingClientRect();
+    var x2 = Math.max(0, Math.min(img.clientWidth, e.clientX - r.left));
+    var y2 = Math.max(0, Math.min(img.clientHeight, e.clientY - r.top));
+    var left = Math.min(start.x, x2);
+    var top = Math.min(start.y, y2);
+    var sx = img.naturalWidth / img.clientWidth;
+    var sy = img.naturalHeight / img.clientHeight;
+    ix.value = String(Math.round(left * sx));
+    iy.value = String(Math.round(top * sy));
+    iw.value = String(Math.max(1, Math.round(Math.abs(x2 - start.x) * sx)));
+    ih.value = String(Math.max(1, Math.round(Math.abs(y2 - start.y) * sy)));
+    start = null;
+    paint();
+  });
+  img.addEventListener("load", paint);
+})();
+</script>`;
 }
 
 function renderScreen(opts: {
@@ -229,6 +305,7 @@ function renderScreen(opts: {
   goodMeans: { how_it_should_behave: string; success: string; must_never: string };
   input: string;
   fileSection: string;
+  regionSection: string;
   draftMark: string | null;
   formType: MarkFormType;
   formMeta: FormRenderMeta;
@@ -245,6 +322,7 @@ function renderScreen(opts: {
     .replace("{{SUCCESS}}", escapeHtml(opts.goodMeans.success))
     .replace("{{MUST_NEVER}}", escapeHtml(opts.goodMeans.must_never))
     .replace("{{FILE_SECTION}}", opts.fileSection)
+    .replace("{{REGION_SECTION}}", opts.regionSection)
     .replace("{{INPUT}}", escapeHtml(opts.input))
     .replace("{{DRAFT_SECTION}}", draftSection(opts.draftMark))
     .replace("{{FORM_FIELDS}}", renderFormFields(opts.formType, opts.draftMark, opts.formMeta))
@@ -260,6 +338,7 @@ function renderThird(opts: {
   goodMeans: { how_it_should_behave: string; success: string; must_never: string };
   input: string;
   fileSection: string;
+  regionSection: string;
   draftMark: string | null;
   formType: MarkFormType;
   formMeta: FormRenderMeta;
@@ -277,6 +356,7 @@ function renderThird(opts: {
     .replace("{{SUCCESS}}", escapeHtml(opts.goodMeans.success))
     .replace("{{MUST_NEVER}}", escapeHtml(opts.goodMeans.must_never))
     .replace("{{FILE_SECTION}}", opts.fileSection)
+    .replace("{{REGION_SECTION}}", opts.regionSection)
     .replace("{{INPUT}}", escapeHtml(opts.input))
     .replace("{{DRAFT_SECTION}}", draftSection(opts.draftMark))
     .replace("{{FORM_FIELDS}}", renderFormFields(opts.formType, opts.draftMark, opts.formMeta))
@@ -413,7 +493,9 @@ export async function registerMarkRoutes(
         evalSetId,
         next.eval_id,
         query.token ?? "",
+        formMeta.needsRegion,
       ),
+      regionSection: regionSectionHtml(formMeta.needsRegion),
       draftMark: row.draft_mark,
       formType,
       formMeta,
@@ -515,7 +597,9 @@ export async function registerMarkRoutes(
         evalSetId,
         evalId,
         token ?? "",
+        formMeta.needsRegion,
       ),
+      regionSection: regionSectionHtml(formMeta.needsRegion),
       draftMark: row.draft_mark,
       formType,
       formMeta,
@@ -607,7 +691,9 @@ export async function registerMarkRoutes(
         evalSetId,
         evalId,
         query.token ?? "",
+        formMeta.needsRegion,
       ),
+      regionSection: regionSectionHtml(formMeta.needsRegion),
       draftMark: row.draft_mark,
       formType,
       formMeta,

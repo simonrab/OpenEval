@@ -28,6 +28,7 @@ const mutating = [
   "run_evals",
   "recommend_models",
   "register_failure",
+  "compile_policy",
 ] as const;
 
 const readOnly = ["get_label_status", "get_eval_report"] as const;
@@ -70,20 +71,33 @@ function validInput(name: (typeof TOOL_NAMES)[number]): Record<string, unknown> 
       };
     case "get_eval_report":
       return { project_id: "prj_1", run_id: "run_1" };
+    case "compile_policy":
+      return {
+        project_id: "prj_1",
+        recommendation_id: "rec_1",
+        eval_set_id: "ste_1",
+        idempotency_key: "idem-1",
+      };
   }
 }
 
-describe("seven tool schemas", () => {
-  it("registers exactly the seven spec tools", () => {
-    assert.deepEqual([...TOOL_NAMES], [
-      "generate_eval_suite",
-      "queue_for_labeling",
-      "get_label_status",
-      "run_evals",
-      "recommend_models",
-      "register_failure",
-      "get_eval_report",
-    ]);
+describe("tool schemas", () => {
+  const v0Tools = [
+    "generate_eval_suite",
+    "queue_for_labeling",
+    "get_label_status",
+    "run_evals",
+    "recommend_models",
+    "register_failure",
+    "get_eval_report",
+  ] as const;
+
+  it("registers the v0 seven tools and compile_policy", () => {
+    for (const name of v0Tools) {
+      assert.ok((TOOL_NAMES as readonly string[]).includes(name));
+    }
+    assert.ok((TOOL_NAMES as readonly string[]).includes("compile_policy"));
+    assert.deepEqual([...TOOL_NAMES], [...v0Tools, "compile_policy"]);
     for (const name of TOOL_NAMES) {
       assert.ok(toolInputSchemas[name]);
     }
@@ -156,6 +170,23 @@ describe("input shapes", () => {
     const parsed = generateEvalSuiteInputSchema.safeParse({
       description: "add a field",
       intent: "add_feature",
+      idempotency_key: "idem-1",
+    });
+    assert.equal(parsed.success, false);
+  });
+
+  it("allows retire_eval_ids without description when eval_set_id is set", () => {
+    const parsed = generateEvalSuiteInputSchema.safeParse({
+      eval_set_id: "ste_1",
+      retire_eval_ids: ["cas_1"],
+      idempotency_key: "idem-1",
+    });
+    assert.equal(parsed.success, true);
+  });
+
+  it("requires eval_set_id when retire_eval_ids is non-empty", () => {
+    const parsed = generateEvalSuiteInputSchema.safeParse({
+      retire_eval_ids: ["cas_1"],
       idempotency_key: "idem-1",
     });
     assert.equal(parsed.success, false);

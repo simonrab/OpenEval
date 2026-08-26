@@ -67,7 +67,46 @@ function sameTool(
   return JSON.stringify(a.args) === JSON.stringify(b.args);
 }
 
-export function marksAgree(a: MarkPayload, b: MarkPayload): AgreementResult {
+export type RegionAgreementSpec = {
+  needs_region?: boolean;
+  region_tolerance?: number;
+};
+
+function regionEdges(region: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): { left: number; top: number; right: number; bottom: number } {
+  return {
+    left: region.x,
+    top: region.y,
+    right: region.x + region.width,
+    bottom: region.y + region.height,
+  };
+}
+
+function regionsWithinTolerance(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+  tolerance: number,
+): boolean {
+  // Each edge (left, top, right, bottom) may differ by at most `tolerance` pixels.
+  const ea = regionEdges(a);
+  const eb = regionEdges(b);
+  return (
+    Math.abs(ea.left - eb.left) <= tolerance &&
+    Math.abs(ea.top - eb.top) <= tolerance &&
+    Math.abs(ea.right - eb.right) <= tolerance &&
+    Math.abs(ea.bottom - eb.bottom) <= tolerance
+  );
+}
+
+export function marksAgree(
+  a: MarkPayload,
+  b: MarkPayload,
+  spec?: RegionAgreementSpec,
+): AgreementResult {
   const left = normalizeMarkPayload(a);
   const right = normalizeMarkPayload(b);
 
@@ -110,6 +149,18 @@ export function marksAgree(a: MarkPayload, b: MarkPayload): AgreementResult {
       break;
     default:
       return { agree: false, reason: "unknown form" };
+  }
+
+  const required = spec?.needs_region === true;
+  if (required || (left.region != null && right.region != null)) {
+    if (left.region == null || right.region == null) {
+      return { agree: false, reason: "region missing" };
+    }
+    const tolerance =
+      typeof spec?.region_tolerance === "number" ? spec.region_tolerance : 8;
+    if (!regionsWithinTolerance(left.region, right.region, tolerance)) {
+      return { agree: false, reason: "region differs" };
+    }
   }
 
   return { agree: true };

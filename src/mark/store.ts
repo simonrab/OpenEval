@@ -300,7 +300,21 @@ export function submitMark(
       const a = parseMarkPayload(regularMarks[0]!.mark);
       const b = parseMarkPayload(regularMarks[1]!.mark);
       if (a && b) {
-        const agreement = marksAgree(a, b);
+        const specRow = db
+          .prepare(`SELECT form_spec FROM evals WHERE id = ?`)
+          .get(input.evalId) as { form_spec: string | null } | undefined;
+        let spec: { needs_region?: boolean; region_tolerance?: number } | undefined;
+        if (specRow?.form_spec) {
+          try {
+            spec = JSON.parse(specRow.form_spec) as {
+              needs_region?: boolean;
+              region_tolerance?: number;
+            };
+          } catch {
+            spec = undefined;
+          }
+        }
+        const agreement = marksAgree(a, b, spec);
         if (agreement.agree) {
           trustEval(db, input.evalId, a);
           setQueueState(db, input.evalSetId, input.evalId, "trusted");

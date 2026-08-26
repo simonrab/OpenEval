@@ -57,7 +57,7 @@ function assertEnvelope(body: unknown): asserts body is {
 }
 
 describe("dispatch registry", () => {
-  it("registers all seven tools", () => {
+  it("registers all tools including compile_policy", () => {
     for (const name of TOOL_NAMES) {
       assert.ok(handlers.has(name), `missing handler for ${name}`);
     }

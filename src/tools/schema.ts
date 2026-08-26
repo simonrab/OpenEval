@@ -17,6 +17,7 @@ export const MUTATING_TOOLS = [
   "run_evals",
   "recommend_models",
   "register_failure",
+  "compile_policy",
 ] as const satisfies readonly ToolName[];
 
 function isMutating(name: ToolName): boolean {
@@ -59,6 +60,7 @@ export const generateEvalSuiteInputSchema = z
     limits: limitsSchema.optional(),
     what_good_means: whatGoodMeansSchema.nullable().optional(),
     size: z.enum(["smoke", "standard"]).optional(),
+    retire_eval_ids: z.array(z.string()).optional(),
     idempotency_key: z.string().min(1),
   })
   .strict()
@@ -66,7 +68,8 @@ export const generateEvalSuiteInputSchema = z
     const hasDescription =
       typeof val.description === "string" && val.description.length > 0;
     const hasGood = val.what_good_means != null;
-    if (!hasDescription && !hasGood) {
+    const retiring = (val.retire_eval_ids?.length ?? 0) > 0;
+    if (!hasDescription && !hasGood && !retiring) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "description or what_good_means is required",
@@ -80,6 +83,13 @@ export const generateEvalSuiteInputSchema = z
         code: z.ZodIssueCode.custom,
         path: ["eval_set_id"],
         message: "eval_set_id is required when intent is add_feature",
+      });
+    }
+    if (retiring && (val.eval_set_id == null || val.eval_set_id === "")) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["eval_set_id"],
+        message: "eval_set_id is required when retire_eval_ids is set",
       });
     }
   });
@@ -211,6 +221,15 @@ export const registerFailureInputSchema = z
       });
     }
   });
+
+export const compilePolicyInputSchema = z
+  .object({
+    project_id: z.string().min(1),
+    recommendation_id: z.string().min(1),
+    eval_set_id: z.string().min(1),
+    idempotency_key: z.string().min(1),
+  })
+  .strict();
 
 export const getEvalReportInputSchema = z
   .object({
@@ -412,6 +431,15 @@ export const getEvalReportOutputSchema = z
   })
   .strict();
 
+export const compilePolicyOutputSchema = z
+  .object({
+    policy_id: z.string(),
+    approve_url: z.string(),
+    live_traffic_changed: z.literal(false),
+    next_action: nextActionSchema,
+  })
+  .strict();
+
 export const toolInputSchemas: Record<ToolName, z.ZodType> = {
   generate_eval_suite: generateEvalSuiteInputSchema,
   queue_for_labeling: queueForLabelingInputSchema,
@@ -420,6 +448,7 @@ export const toolInputSchemas: Record<ToolName, z.ZodType> = {
   recommend_models: recommendModelsInputSchema,
   register_failure: registerFailureInputSchema,
   get_eval_report: getEvalReportInputSchema,
+  compile_policy: compilePolicyInputSchema,
 };
 
 export type ParseToolInputResult =
