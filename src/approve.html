@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Approve named model</title>
+  <style>
+    body { font-family: sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+    .meta { color: #444; font-size: 0.9rem; }
+    button { margin-top: 1rem; padding: 0.4rem 0.8rem; margin-right: 0.5rem; }
+    dl { display: grid; grid-template-columns: 8rem 1fr; gap: 0.25rem 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Named model recommendation</h1>
+  <p>Recommendation {{RECOMMENDATION_ID}}</p>
+  <p>EvalRouter recommends a model id for the app. Approving does not change live traffic or write your app config.</p>
+  {{BANNER}}
+  <dl>
+    <dt>Named model</dt><dd>{{NAMED_MODEL}}</dd>
+    <dt>Backups</dt><dd>{{BACKUPS}}</dd>
+    <dt>Quality</dt><dd>{{QUALITY}}</dd>
+    <dt>Time p50</dt><dd>{{TIME_P50}} ms</dd>
+    <dt>Time p95</dt><dd>{{TIME_P95}} ms</dd>
+    <dt>Cost</dt><dd>${{COST_USD}}</dd>
+  </dl>
+  <form method="post" action="/approve">
+    <input type="hidden" name="recommendation_id" value="{{RECOMMENDATION_ID}}">
+    <input type="hidden" name="token" value="{{TOKEN}}">
+    <button type="submit" name="decision" value="approved">Approve</button>
+    <button type="submit" name="decision" value="rejected">Reject</button>
+  </form>
+</body>
+</html>

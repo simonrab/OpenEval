@@ -1,0 +1,24 @@
+# Minimal GitHub Action: calls examples/ci-recheck.sh only (no recommend_models).
+name: EvalRouter recheck
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  recheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run CI recheck
+        env:
+          EVALROUTER_URL: ${{ secrets.EVALROUTER_URL }}
+          EVALROUTER_API_KEY: ${{ secrets.EVALROUTER_API_KEY }}
+          PROJECT_ID: ${{ secrets.EVALROUTER_PROJECT_ID }}
+          EVAL_SET_ID: ${{ secrets.EVALROUTER_EVAL_SET_ID }}
+          REC_ID: ${{ secrets.EVALROUTER_REC_ID }}
+          MODEL_ID: ${{ secrets.EVALROUTER_MODEL_ID }}
+          KEYS_REF: ${{ secrets.EVALROUTER_KEYS_REF }}
+          MAX_EVAL_SPEND_USD: ${{ vars.EVALROUTER_MAX_EVAL_SPEND_USD || '1' }}
+        run: bash examples/ci-recheck.sh

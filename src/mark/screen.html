@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Mark eval</title>
+  <style>
+    body { font-family: sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+    .meta { color: #444; font-size: 0.9rem; }
+    .box { border: 1px solid #ddd; padding: 0.75rem; margin: 0.75rem 0; }
+    .draft { background: #fafafa; }
+    label { display: block; margin: 0.35rem 0; }
+    button { margin-top: 1rem; padding: 0.4rem 0.8rem; margin-right: 0.5rem; }
+    textarea { width: 100%; min-height: 4rem; }
+  </style>
+</head>
+<body>
+  <h1>Mark eval</h1>
+  <p class="meta">Eval set {{EVAL_SET_ID}} · {{EVALS_LEFT}} left in queue</p>
+  {{BANNER}}
+  <section class="box">
+    <h2>What good means</h2>
+    <p><strong>Should:</strong> {{HOW_BEHAVE}}</p>
+    <p><strong>Success:</strong> {{SUCCESS}}</p>
+    <p><strong>Must never:</strong> {{MUST_NEVER}}</p>
+  </section>
+  <section class="box">
+    <h2>Example input</h2>
+    <pre>{{INPUT}}</pre>
+  </section>
+  {{DRAFT_SECTION}}
+  <form method="post" action="/mark">
+    <input type="hidden" name="eval_set_id" value="{{EVAL_SET_ID}}">
+    <input type="hidden" name="eval_id" value="{{EVAL_ID}}">
+    <input type="hidden" name="token" value="{{TOKEN}}">
+    <label>Who are you?
+      <select name="person_id" required>{{PERSON_OPTIONS}}</select>
+    </label>
+    {{FORM_FIELDS}}
+    <label>Optional why (not used for agreement)
+      <input type="text" name="why" maxlength="200">
+    </label>
+    <button type="submit" name="action" value="submit">Submit mark</button>
+    <label>Reason (required for cannot mark)
+      <input type="text" name="reason" maxlength="200">
+    </label>
+    <button type="submit" name="action" value="cannot_mark" formaction="/mark/cannot">Cannot mark</button>
+  </form>
+</body>
+</html>

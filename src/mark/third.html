@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Third-person mark</title>
+  <style>
+    body { font-family: sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+    .meta { color: #444; font-size: 0.9rem; }
+    .box { border: 1px solid #ddd; padding: 0.75rem; margin: 0.75rem 0; }
+    label { display: block; margin: 0.35rem 0; }
+    button { margin-top: 1rem; padding: 0.4rem 0.8rem; margin-right: 0.5rem; }
+    textarea { width: 100%; min-height: 4rem; }
+  </style>
+</head>
+<body>
+  <h1>Third-person decision</h1>
+  <p class="meta">Eval set {{EVAL_SET_ID}} · eval {{EVAL_ID}}</p>
+  {{BANNER}}
+  <section class="box">
+    <h2>What good means</h2>
+    <p><strong>Should:</strong> {{HOW_BEHAVE}}</p>
+    <p><strong>Success:</strong> {{SUCCESS}}</p>
+    <p><strong>Must never:</strong> {{MUST_NEVER}}</p>
+  </section>
+  <section class="box">
+    <h2>Example input</h2>
+    <pre>{{INPUT}}</pre>
+  </section>
+  {{DRAFT_SECTION}}
+  <section class="box">
+    <h2>First two marks</h2>
+    {{PRIOR_MARKS}}
+  </section>
+  <form method="post" action="/mark/third">
+    <input type="hidden" name="eval_set_id" value="{{EVAL_SET_ID}}">
+    <input type="hidden" name="eval_id" value="{{EVAL_ID}}">
+    <input type="hidden" name="token" value="{{TOKEN}}">
+    <input type="hidden" name="person_id" value="{{PERSON_ID}}">
+    <label>Pick a mark to trust
+      <select name="pick_person_id">
+        <option value="">— write a new mark below —</option>
+        {{PICK_OPTIONS}}
+      </select>
+    </label>
+    {{FORM_FIELDS}}
+    <button type="submit" name="action" value="submit">Submit trusted mark</button>
+    <button type="submit" name="action" value="drop">Drop eval</button>
+  </form>
+</body>
+</html>

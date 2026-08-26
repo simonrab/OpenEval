@@ -1,0 +1,20 @@
+---
+description: Follow AGENTS.md for EvalRouter (spec freeze, BDD jobs, TDD impl)
+alwaysApply: true
+---
+
+# EvalRouter
+
+Read [AGENTS.md](../../AGENTS.md) at the repo root before you change code. That file is the project guideline for coding agents.
+
+`EVALROUTER_REQUIREMENTS.md` is product truth. It is frozen unless the user explicitly asks to change the spec. Do not edit `spec/`.
+
+`BUILD.md` is the build order. Do not put build order inside the spec.
+
+Product jobs (J1–J8) are BDD. A slice is done when Given / When / Then holds.
+
+Implementation (API, runner, MCP) uses TDD. Write a failing unit or integration test, then code. CI failing the build on a named-model eval miss is J7, not TDD.
+
+Evals are product checks, not unit tests. Do not call evals "tests" in product copy.
+
+After a slice review passes, write `build/handoffs/slice-N.md` and start slice N+1 at once. Do not wait for the user. See AGENTS.md “Slice loop”.

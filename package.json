@@ -1,0 +1,28 @@
+{
+  "name": "evalrouter",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --import ./test/load-env.ts --import tsx --test test/*.test.ts test/scoring/*.test.ts",
+    "start": "node --env-file=.env --import tsx src/server.ts",
+    "mcp": "node --env-file=.env --import tsx src/mcp/stdio.ts",
+    "build": "tsc && cp src/schema.sql dist/schema.sql && cp src/accept.html dist/accept.html && cp src/approve.html dist/approve.html && cp src/report.html dist/report.html && cp src/mark/screen.html dist/mark/screen.html && cp src/mark/third.html dist/mark/third.html"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "better-sqlite3": "^11.10.0",
+    "fastify": "^5.4.0",
+    "tsx": "^4.20.0",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.25.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.0"
+  }
+}

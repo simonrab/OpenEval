@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "evalrouter": {
+      "command": "npm",
+      "args": ["run", "mcp"],
+      "env": {
+        "EVALROUTER_URL": "http://127.0.0.1:3000",
+        "EVALROUTER_KEY": "replace-with-your-evalrouter-key"
+      }
+    }
+  }
+}
