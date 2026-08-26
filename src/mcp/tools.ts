@@ -13,11 +13,14 @@ export type McpToolDefinition = {
 };
 
 const MCP_DESCRIPTIONS: Record<ToolName, string> = {
-  generate_eval_suite: "Write a first eval set from a job description.",
-  queue_for_labeling: "Queue evals that a person must mark.",
+  generate_eval_suite:
+    "Start here. Write draft evals for one job the user names. Then follow next_action.",
+  queue_for_labeling:
+    "Queue evals that a person must mark. Show mark_url and stop.",
   get_label_status: "Return mark counts for an eval set.",
   run_evals: "Run models on a frozen eval set.",
-  recommend_models: "Name the cheapest fast model that still passes.",
+  recommend_models:
+    "Name the cheapest fast model that still passes. Show approve_url and stop.",
   register_failure: "Add a failure as a new eval on a new eval-set version.",
   get_eval_report: "Return a short eval run report that fits in context.",
   compile_policy: "Compile rec_ and ste_ into a pol_. This tool does not send live traffic.",

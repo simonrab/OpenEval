@@ -38,12 +38,61 @@ export async function callToolViaHttp(
   return { status: res.status, body: parsed };
 }
 
+export const MCP_INSTRUCTIONS = [
+  "The user names one job. That is the whole request.",
+  "Call generate_eval_suite first. Then call only next_action.tool.",
+  "When the result starts with Stop, show the URL to the user and wait.",
+  "Do not accept, mark, or approve. Do not write a model id until the user approves.",
+  "If a project or keys_ref is missing, create it. Do not ask the user to curl.",
+].join(" ");
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function urlForAskHuman(
+  body: Record<string, unknown>,
+  askHuman: string,
+): string | null {
+  const key = askHuman.startsWith("open ") ? askHuman.slice("open ".length) : null;
+  if (!key) {
+    return null;
+  }
+  const top = body[key];
+  if (typeof top === "string" && top.length > 0) {
+    return top;
+  }
+  const nextAction = isRecord(body.next_action) ? body.next_action : null;
+  const args = nextAction && isRecord(nextAction.args) ? nextAction.args : null;
+  const nested = args ? args[key] : null;
+  return typeof nested === "string" && nested.length > 0 ? nested : null;
+}
+
+export function formatMcpToolContent(body: unknown): string {
+  const json = JSON.stringify(body, null, 2);
+  if (!isRecord(body) || !isRecord(body.next_action)) {
+    return json;
+  }
+  const askHuman = body.next_action.ask_human;
+  if (typeof askHuman === "string" && askHuman.length > 0) {
+    const url = urlForAskHuman(body, askHuman);
+    if (url) {
+      return `Stop. Show this URL to the user and wait: ${url}\n\n${json}`;
+    }
+    return `Stop. Ask the user: ${askHuman}\n\n${json}`;
+  }
+  const tool = body.next_action.tool;
+  if (typeof tool === "string" && tool.length > 0) {
+    return `Next: call ${tool}.\n\n${json}`;
+  }
+  return json;
+}
+
 export function createMcpServer(config: McpClientConfig): McpServer {
   const server = new McpServer(
     { name: "evalrouter", version: "0.0.0" },
     {
-      instructions:
-        "EvalRouter agent tools. Same JSON as POST /v1/tools/{name}. Requires evalrouter serve running.",
+      instructions: MCP_INSTRUCTIONS,
     },
   );
 
@@ -57,7 +106,7 @@ export function createMcpServer(config: McpClientConfig): McpServer {
       async (args) => {
         const result = await callToolViaHttp(tool.name, args, config);
         return {
-          content: [{ type: "text", text: JSON.stringify(result.body) }],
+          content: [{ type: "text", text: formatMcpToolContent(result.body) }],
           isError: result.status >= 400,
         };
       },

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
-import { callToolViaHttp } from "../src/mcp/server.js";
+import { callToolViaHttp, MCP_INSTRUCTIONS } from "../src/mcp/server.js";
 import { getMcpInputSchema, MCP_TOOLS } from "../src/mcp/tools.js";
 import { parseToolInput, TOOL_NAMES } from "../src/tools/schema.js";
 import { ErrorCode, isAgentError } from "../src/tools/types.js";
@@ -171,6 +171,14 @@ async function postViaMcpClient(
 }
 
 describe("MCP tool registry", () => {
+  it("tells the coding agent to follow next_action and stop for the human", () => {
+    assert.match(MCP_INSTRUCTIONS, /next_action/);
+    assert.match(MCP_INSTRUCTIONS, /Stop/);
+    assert.match(MCP_INSTRUCTIONS, /do not accept/i);
+    assert.match(MCP_INSTRUCTIONS, /do not write a model id/i);
+    assert.match(MCP_INSTRUCTIONS, /one job/i);
+  });
+
   it("registers v0, Live v1, and V2 tools with non-empty schemas", () => {
     assert.equal(MCP_TOOLS.length, 14);
     const v0 = [
