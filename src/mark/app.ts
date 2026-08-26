@@ -7,8 +7,11 @@ import { listMembers } from "../eval-set.js";
 import { registerFormParser } from "../routes/form-parser.js";
 import {
   markFromFormBody,
+  parseFormRenderMeta,
+  type FormRenderMeta,
   type MarkFormType,
   type MarkPayload,
+  type PassFailChoice,
   type StoredMark,
 } from "./forms.js";
 import {
@@ -41,24 +44,104 @@ function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function renderFormFields(formType: MarkFormType, draftMark: string | null): string {
+function rubricRadio(
+  name: string,
+  label: string,
+  selected?: PassFailChoice,
+): string {
+  const choices: PassFailChoice[] = ["pass", "fail", "na"];
+  const inputs = choices
+    .map((value) => {
+      const checked = selected === value ? " checked" : "";
+      const required = value === "pass" ? " required" : "";
+      return `<label><input type="radio" name="${escapeHtml(name)}" value="${value}"${checked}${required}> ${value}</label>`;
+    })
+    .join("\n  ");
+  return `<fieldset>
+  <legend>${escapeHtml(label)}</legend>
+  ${inputs}
+</fieldset>`;
+}
+
+function renderFormFields(
+  formType: MarkFormType,
+  draftMark: string | null,
+  meta: FormRenderMeta,
+): string {
   if (formType === "pass_fail") {
+    const textDefault =
+      draftMark != null && !draftMark.trimStart().startsWith("{")
+        ? draftMark
+        : "";
     return `<fieldset>
   <legend>Pass / fail</legend>
   <label><input type="radio" name="pass_fail" value="pass" required> Pass</label>
   <label><input type="radio" name="pass_fail" value="fail"> Fail</label>
   <label><input type="radio" name="pass_fail" value="na"> Not applicable</label>
   <label>Expected text (optional)
-    <textarea name="expected_text">${escapeHtml(draftMark ?? "")}</textarea>
+    <textarea name="expected_text">${escapeHtml(textDefault)}</textarea>
   </label>
 </fieldset>`;
   }
   if (formType === "text") {
+    const textDefault =
+      draftMark != null && !draftMark.trimStart().startsWith("{")
+        ? draftMark
+        : "";
     return `<label>Expected text
-  <textarea name="expected_text" required>${escapeHtml(draftMark ?? "")}</textarea>
+  <textarea name="expected_text" required>${escapeHtml(textDefault)}</textarea>
 </label>`;
   }
+  if (formType === "fields") {
+    const rows = meta.fieldNames
+      .map(
+        (name) =>
+          `<label>${escapeHtml(name)}
+  <input type="text" name="field_${escapeHtml(name)}" value="${escapeHtml(meta.fieldDefaults[name] ?? "")}" required>
+</label>`,
+      )
+      .join("\n");
+    return `<fieldset>
+  <legend>Fields</legend>
+${rows}
+</fieldset>`;
+  }
+  if (formType === "rubric") {
+    const rows = meta.rubricNames
+      .map((name) => rubricRadio(`rubric_${name}`, name, meta.rubricDefaults[name]))
+      .join("\n");
+    return `<fieldset>
+  <legend>Rubric</legend>
+${rows}
+</fieldset>`;
+  }
+  if (formType === "tool") {
+    return `<fieldset>
+  <legend>Expected tool call</legend>
+  <label>Tool name
+    <input type="text" name="tool_name" value="${escapeHtml(meta.toolNameDefault)}" required>
+  </label>
+  <label>Tool args (JSON)
+    <textarea name="tool_args">${escapeHtml(meta.toolArgsDefault)}</textarea>
+  </label>
+</fieldset>`;
+  }
   return `<p>Form type ${escapeHtml(formType)} is not wired on this screen yet.</p>`;
+}
+
+function loadFormRenderMeta(
+  db: Database.Database,
+  evalId: string,
+  formType: MarkFormType,
+): FormRenderMeta {
+  const row = db
+    .prepare(`SELECT draft_mark, form_spec FROM evals WHERE id = ?`)
+    .get(evalId) as { draft_mark: string | null; form_spec: string | null } | undefined;
+  return parseFormRenderMeta(
+    row?.draft_mark ?? null,
+    row?.form_spec ?? null,
+    formType,
+  );
 }
 
 function draftSection(draftMark: string | null): string {
@@ -84,6 +167,23 @@ function formatMarkSummary(mark: StoredMark): string {
   if (payload.expected_text) {
     parts.push(`text: ${payload.expected_text}`);
   }
+  if (payload.fields) {
+    parts.push(
+      `fields: ${Object.entries(payload.fields)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(", ")}`,
+    );
+  }
+  if (payload.rubric) {
+    parts.push(
+      `rubric: ${Object.entries(payload.rubric)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(", ")}`,
+    );
+  }
+  if (payload.tool) {
+    parts.push(`tool: ${payload.tool.name}`);
+  }
   return escapeHtml(parts.join(" · "));
 }
 
@@ -106,6 +206,7 @@ function renderScreen(opts: {
   input: string;
   draftMark: string | null;
   formType: MarkFormType;
+  formMeta: FormRenderMeta;
   personOptionsHtml: string;
   banner: string;
 }): string {
@@ -120,7 +221,7 @@ function renderScreen(opts: {
     .replace("{{MUST_NEVER}}", escapeHtml(opts.goodMeans.must_never))
     .replace("{{INPUT}}", escapeHtml(opts.input))
     .replace("{{DRAFT_SECTION}}", draftSection(opts.draftMark))
-    .replace("{{FORM_FIELDS}}", renderFormFields(opts.formType, opts.draftMark))
+    .replace("{{FORM_FIELDS}}", renderFormFields(opts.formType, opts.draftMark, opts.formMeta))
     .replace("{{PERSON_OPTIONS}}", opts.personOptionsHtml)
     .replace("{{BANNER}}", opts.banner);
 }
@@ -134,6 +235,7 @@ function renderThird(opts: {
   input: string;
   draftMark: string | null;
   formType: MarkFormType;
+  formMeta: FormRenderMeta;
   priorMarksHtml: string;
   pickOptions: string;
   banner: string;
@@ -149,7 +251,7 @@ function renderThird(opts: {
     .replace("{{MUST_NEVER}}", escapeHtml(opts.goodMeans.must_never))
     .replace("{{INPUT}}", escapeHtml(opts.input))
     .replace("{{DRAFT_SECTION}}", draftSection(opts.draftMark))
-    .replace("{{FORM_FIELDS}}", renderFormFields(opts.formType, opts.draftMark))
+    .replace("{{FORM_FIELDS}}", renderFormFields(opts.formType, opts.draftMark, opts.formMeta))
     .replace("{{PRIOR_MARKS}}", opts.priorMarksHtml)
     .replace("{{PICK_OPTIONS}}", opts.pickOptions)
     .replace("{{BANNER}}", opts.banner);
@@ -240,6 +342,7 @@ export async function registerMarkRoutes(
       score_how: "code" | "person";
     };
     const formType = ensureEvalFormMeta(db, next.eval_id, row.score_how);
+    const formMeta = loadFormRenderMeta(db, next.eval_id, formType);
 
     const html = renderScreen({
       evalSetId,
@@ -250,6 +353,7 @@ export async function registerMarkRoutes(
       input: row.input_truncated,
       draftMark: row.draft_mark,
       formType,
+      formMeta,
       personOptionsHtml: personOptions(people, markedIds),
       banner: "",
     });
@@ -335,6 +439,7 @@ export async function registerMarkRoutes(
       .prepare("SELECT project_id FROM eval_sets WHERE id = ?")
       .get(evalSetId) as { project_id: string };
     const people = ensureProjectPeople(db, set.project_id);
+    const formMeta = loadFormRenderMeta(db, evalId, formType);
     const html = renderScreen({
       evalSetId,
       evalId,
@@ -344,6 +449,7 @@ export async function registerMarkRoutes(
       input: row.input_truncated,
       draftMark: row.draft_mark,
       formType,
+      formMeta,
       personOptionsHtml: personOptions(people, [personId]),
       banner: `<p>Saved. State: ${escapeHtml(result.state)}${result.trusted ? " · trusted" : ""}</p>`,
     });
@@ -406,6 +512,7 @@ export async function registerMarkRoutes(
       score_how: "code" | "person";
     };
     const formType = ensureEvalFormMeta(db, evalId, row.score_how);
+    const formMeta = loadFormRenderMeta(db, evalId, formType);
     const priorHtml = prior
       .map((m) => {
         const person = people.find((p) => p.id === m.person_id);
@@ -428,6 +535,7 @@ export async function registerMarkRoutes(
       input: row.input_truncated,
       draftMark: row.draft_mark,
       formType,
+      formMeta,
       priorMarksHtml: priorHtml,
       pickOptions,
       banner: "",

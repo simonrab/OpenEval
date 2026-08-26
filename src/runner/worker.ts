@@ -14,9 +14,9 @@ import {
 } from "./queue.js";
 import type { OpenRouterClient } from "./openrouter.js";
 import {
-  canStartEval,
-  createSpendTracker,
-  recordSpend,
+  acquireEvalStart,
+  createSpendGate,
+  finishEvalSpend,
 } from "./spend.js";
 
 export type WorkerOptions = {
@@ -126,14 +126,15 @@ export async function processRun(opts: WorkerOptions, runId: string): Promise<vo
     return;
   }
 
-  const tracker = createSpendTracker(run.max_eval_spend_usd);
+  const gate = createSpendGate(run.max_eval_spend_usd);
   let capHit = false;
 
-  modelLoop: for (const modelId of models) {
+  const runModel = async (modelId: string): Promise<void> => {
     for (const ev of evals) {
-      if (!canStartEval(tracker)) {
+      const started = await acquireEvalStart(gate);
+      if (!started) {
         capHit = true;
-        break modelLoop;
+        return;
       }
 
       let content: string;
@@ -149,6 +150,7 @@ export async function processRun(opts: WorkerOptions, runId: string): Promise<vo
         timeMs = result.time_ms;
         costUsd = result.cost_usd;
       } catch {
+        await finishEvalSpend(gate, 0);
         insertRunResult(opts.db, {
           runId,
           evalId: ev.eval_id,
@@ -161,7 +163,7 @@ export async function processRun(opts: WorkerOptions, runId: string): Promise<vo
         continue;
       }
 
-      recordSpend(tracker, costUsd);
+      await finishEvalSpend(gate, costUsd);
       let scored: { passed: boolean; reason_short: string };
       if (ev.kind === "code") {
         scored = scoreProgramCheck(content, ev.program_check!);
@@ -178,15 +180,14 @@ export async function processRun(opts: WorkerOptions, runId: string): Promise<vo
         costUsd,
       });
 
-      if (tracker.exceeded) {
+      if (gate.exceeded) {
         capHit = true;
-        break modelLoop;
+        return;
       }
     }
-  }
+  };
 
-  const scoredCount = countResults(opts.db, runId);
-  const expectedCount = evals.length * models.length;
+  await Promise.all(models.map((modelId) => runModel(modelId)));
 
   if (capHit) {
     updateRunStatus(
@@ -194,7 +195,7 @@ export async function processRun(opts: WorkerOptions, runId: string): Promise<vo
       runId,
       "partial",
       ErrorCode.COST_CAP_EXCEEDED,
-      tracker.spent,
+      gate.spent,
     );
     return;
   }
@@ -207,15 +208,11 @@ export async function processRun(opts: WorkerOptions, runId: string): Promise<vo
       named.model_id,
       evals.map((e) => e.eval_id),
     );
-    updateRunStatus(opts.db, runId, "succeeded", code, tracker.spent);
+    updateRunStatus(opts.db, runId, "succeeded", code, gate.spent);
     return;
   }
 
-  if (scoredCount >= expectedCount) {
-    updateRunStatus(opts.db, runId, "succeeded", null, tracker.spent);
-  } else {
-    updateRunStatus(opts.db, runId, "succeeded", null, tracker.spent);
-  }
+  updateRunStatus(opts.db, runId, "succeeded", null, gate.spent);
 }
 
 function recheckResultCode(
@@ -232,13 +229,6 @@ function recheckResultCode(
   }
   const anyFail = results.some((r) => r.passed !== 1);
   return anyFail ? ErrorCode.need_new_model : null;
-}
-
-function countResults(db: Database.Database, runId: string): number {
-  const row = db
-    .prepare("SELECT COUNT(*) AS n FROM run_results WHERE run_id = ?")
-    .get(runId) as { n: number };
-  return row.n;
 }
 
 export function hasEnoughTrustedEvals(members: MemberEval[]): boolean {

@@ -5,6 +5,7 @@ import { dispatch } from "../dispatch.js";
 export type ToolsRouteContext = {
   baseUrl?: string;
   apiKey?: string;
+  openRouter?: import("../runner/openrouter.js").OpenRouterClient;
 };
 
 export async function registerTools(
@@ -18,6 +19,7 @@ export async function registerTools(
       db,
       baseUrl: ctx.baseUrl,
       apiKey: ctx.apiKey,
+      openRouter: ctx.openRouter,
     });
     return reply.code(result.status).send(result.body);
   });

@@ -1,4 +1,3 @@
-import type Database from "better-sqlite3";
 import { agentError, needMoreEvalsError, projectNotFoundError, suiteNotFoundError } from "../errors.js";
 import {
   getEvalSet,
@@ -7,7 +6,8 @@ import {
   storeIdempotentResponse,
 } from "../eval-set.js";
 import { newRecId } from "../ids.js";
-import { projectExists } from "../keys.js";
+import { getJobLimits } from "../job.js";
+import { deriveWrapKey, projectExists, readSecret } from "../keys.js";
 import { getRun, listRunResults } from "../runner/queue.js";
 import { hasEnoughTrustedEvals } from "../runner/worker.js";
 import { getOldTrustedEvalIds } from "../eval-set-copy.js";
@@ -15,9 +15,9 @@ import { resolveMarkUrlForSet } from "./get_label_status.js";
 import {
   aggregateModelStats,
   pickNamedModel,
-  type JobLimits,
   type ModelStats,
 } from "../rank.js";
+import type { CatalogModel } from "../runner/catalog.js";
 import type { ToolHandler } from "../dispatch.js";
 import {
   recommendModelsOutputSchema,
@@ -27,23 +27,6 @@ import { ErrorCode } from "./types.js";
 import type { z } from "zod";
 
 type RecommendInput = z.infer<typeof recommendModelsInputSchema>;
-
-function getJobLimits(
-  db: Database.Database,
-  evalSetId: string,
-): JobLimits | null {
-  const row = db
-    .prepare(
-      `SELECT j.limits FROM eval_sets es
-       JOIN jobs j ON j.id = es.job_id
-       WHERE es.id = ?`,
-    )
-    .get(evalSetId) as { limits: string | null } | undefined;
-  if (!row?.limits) {
-    return null;
-  }
-  return JSON.parse(row.limits) as JobLimits;
-}
 
 function dropModelsFailingOldEvals(
   stats: ModelStats[],
@@ -112,7 +95,7 @@ function storeRecommendation(
   );
 }
 
-export const handleRecommendModels: ToolHandler = (body, ctx) => {
+export const handleRecommendModels: ToolHandler = async (body, ctx) => {
   const db = ctx.db;
   const baseUrl = ctx.baseUrl ?? "http://127.0.0.1:3000";
   if (!db) {
@@ -267,12 +250,25 @@ export const handleRecommendModels: ToolHandler = (body, ctx) => {
   }));
 
   const limits = getJobLimits(db, input.eval_set_id);
+  let liveCatalog: CatalogModel[] | undefined;
+  if (ctx.openRouter?.listModels && ctx.apiKey && run.keys_ref) {
+    try {
+      const customerKey = readSecret(
+        db,
+        deriveWrapKey(ctx.apiKey),
+        run.keys_ref,
+      );
+      liveCatalog = await ctx.openRouter.listModels(customerKey);
+    } catch {
+      liveCatalog = undefined;
+    }
+  }
   let stats = aggregateModelStats(results, trustedEvalIds);
   if (input.intent === "add_feature") {
     const oldTrustedEvalIds = getOldTrustedEvalIds(db, input.eval_set_id);
     stats = dropModelsFailingOldEvals(stats, oldTrustedEvalIds);
   }
-  const picked = pickNamedModel(stats, limits);
+  const picked = pickNamedModel(stats, limits, liveCatalog);
 
   const allTimes = results.map((r) => r.time_ms);
   const totalCost = results.reduce((sum, r) => sum + r.cost_usd, 0);

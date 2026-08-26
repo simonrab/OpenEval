@@ -1,3 +1,9 @@
+import {
+  catalogById,
+  matchesAnyModelPattern,
+  type CatalogModel,
+} from "./runner/catalog.js";
+
 export type JobLimits = {
   needs_images?: boolean;
   modalities?: string[];
@@ -52,7 +58,17 @@ export const MODEL_CATALOG: Record<string, ModelCatalogEntry> = {
   },
 };
 
-function catalogEntry(modelId: string): ModelCatalogEntry {
+function catalogEntry(
+  modelId: string,
+  live: Map<string, CatalogModel> | undefined,
+): ModelCatalogEntry {
+  const fromLive = live?.get(modelId);
+  if (fromLive) {
+    return {
+      supportsImages: fromLive.supportsImages,
+      listCostPer1kUsd: fromLive.listCostPer1kUsd,
+    };
+  }
   return (
     MODEL_CATALOG[modelId] ?? {
       supportsImages: false,
@@ -70,16 +86,6 @@ function percentile(values: number[], p: number): number {
   return sorted[Math.max(0, idx)] ?? 0;
 }
 
-function matchesPattern(modelId: string, pattern: string): boolean {
-  if (pattern.endsWith("/*")) {
-    return modelId.startsWith(pattern.slice(0, -1));
-  }
-  return modelId === pattern;
-}
-
-function matchesAnyPattern(modelId: string, patterns: string[]): boolean {
-  return patterns.some((p) => matchesPattern(modelId, p));
-}
 
 export function aggregateModelStats(
   results: RunResultRow[],
@@ -133,12 +139,14 @@ export function aggregateModelStats(
 export function applyHardLimits(
   stats: ModelStats[],
   limits: JobLimits | null,
+  liveCatalog?: CatalogModel[],
 ): ModelStats[] {
   if (!limits) {
     return stats;
   }
+  const live = liveCatalog ? catalogById(liveCatalog) : undefined;
   return stats.filter((s) => {
-    const catalog = catalogEntry(s.modelId);
+    const catalog = catalogEntry(s.modelId, live);
     if (limits.needs_images && !catalog.supportsImages) {
       return false;
     }
@@ -160,14 +168,14 @@ export function applyHardLimits(
     if (
       limits.allowed_models &&
       limits.allowed_models.length > 0 &&
-      !matchesAnyPattern(s.modelId, limits.allowed_models)
+      !matchesAnyModelPattern(s.modelId, limits.allowed_models)
     ) {
       return false;
     }
     if (
       limits.excluded_models &&
       limits.excluded_models.length > 0 &&
-      matchesAnyPattern(s.modelId, limits.excluded_models)
+      matchesAnyModelPattern(s.modelId, limits.excluded_models)
     ) {
       return false;
     }
@@ -185,8 +193,9 @@ function compareCheapestFast(a: ModelStats, b: ModelStats): number {
 export function pickNamedModel(
   stats: ModelStats[],
   limits: JobLimits | null,
+  liveCatalog?: CatalogModel[],
 ): PickResult {
-  const afterLimits = applyHardLimits(stats, limits);
+  const afterLimits = applyHardLimits(stats, limits, liveCatalog);
   const passers = afterLimits.filter((s) => s.passedAll);
   if (passers.length === 0) {
     const failingEvalIds = [

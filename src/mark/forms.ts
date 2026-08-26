@@ -7,6 +7,106 @@ export type MarkFormType =
 
 export type PassFailChoice = "pass" | "fail" | "na";
 
+export type FormRenderMeta = {
+  fieldNames: string[];
+  fieldDefaults: Record<string, string>;
+  rubricNames: string[];
+  rubricDefaults: Record<string, PassFailChoice>;
+  toolNameDefault: string;
+  toolArgsDefault: string;
+};
+
+function emptyFormRenderMeta(): FormRenderMeta {
+  return {
+    fieldNames: [],
+    fieldDefaults: {},
+    rubricNames: [],
+    rubricDefaults: {},
+    toolNameDefault: "",
+    toolArgsDefault: "{}",
+  };
+}
+
+function parseJsonRecord(raw: string | null): Record<string, unknown> | null {
+  if (raw == null || raw.trim().length === 0) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed != null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((v): v is string => typeof v === "string" && v.length > 0);
+}
+
+export function parseFormRenderMeta(
+  draftMark: string | null,
+  formSpecJson: string | null,
+  formType: MarkFormType,
+): FormRenderMeta {
+  const meta = emptyFormRenderMeta();
+  const draft = parseJsonRecord(draftMark);
+  const spec = parseJsonRecord(formSpecJson);
+
+  if (draft?.fields != null && typeof draft.fields === "object") {
+    for (const [key, value] of Object.entries(
+      draft.fields as Record<string, unknown>,
+    )) {
+      meta.fieldNames.push(key);
+      if (typeof value === "string") {
+        meta.fieldDefaults[key] = value;
+      }
+    }
+  }
+  if (draft?.rubric != null && typeof draft.rubric === "object") {
+    for (const [key, value] of Object.entries(
+      draft.rubric as Record<string, unknown>,
+    )) {
+      meta.rubricNames.push(key);
+      if (value === "pass" || value === "fail" || value === "na") {
+        meta.rubricDefaults[key] = value;
+      }
+    }
+  }
+  if (draft?.tool != null && typeof draft.tool === "object") {
+    const tool = draft.tool as { name?: unknown; args?: unknown };
+    if (typeof tool.name === "string") {
+      meta.toolNameDefault = tool.name;
+    }
+    if (tool.args != null && typeof tool.args === "object") {
+      meta.toolArgsDefault = JSON.stringify(tool.args, null, 2);
+    }
+  }
+
+  const specFields = stringList(spec?.fields);
+  if (specFields.length > 0) {
+    meta.fieldNames = [...new Set([...specFields, ...meta.fieldNames])];
+  }
+  const specRubric = stringList(spec?.rubric);
+  if (specRubric.length > 0) {
+    meta.rubricNames = [...new Set([...specRubric, ...meta.rubricNames])];
+  }
+
+  if (formType === "fields" && meta.fieldNames.length === 0) {
+    meta.fieldNames = ["expected"];
+  }
+  if (formType === "rubric" && meta.rubricNames.length === 0) {
+    meta.rubricNames = ["quality"];
+  }
+
+  return meta;
+}
+
 export type MarkPayload = {
   form_type: MarkFormType;
   pass_fail?: PassFailChoice;

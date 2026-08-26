@@ -143,4 +143,33 @@ describe("rank (J4)", () => {
     assert.ok(!limited.some((s) => s.modelId === "meta-llama/llama-3.1-8b-instruct"));
     assert.ok(limited.some((s) => s.modelId === "openai/gpt-4o-mini"));
   });
+
+  it("uses live catalog for image support instead of the frozen map", () => {
+    const results = [
+      row("google/gemini-2.5-flash", "cas_a", true, 40, 0.005),
+      row("google/gemini-2.5-flash", "cas_b", true, 40, 0.005),
+      row("mistralai/mistral-small-3.1", "cas_a", true, 30, 0.001),
+      row("mistralai/mistral-small-3.1", "cas_b", true, 30, 0.001),
+    ];
+    const stats = aggregateModelStats(results, ["cas_a", "cas_b"]);
+    const live = [
+      {
+        id: "google/gemini-2.5-flash",
+        supportsImages: true,
+        inputModalities: ["text", "image"],
+        listCostPer1kUsd: 0.00015,
+        created: 1,
+      },
+      {
+        id: "mistralai/mistral-small-3.1",
+        supportsImages: false,
+        inputModalities: ["text"],
+        listCostPer1kUsd: 0.00008,
+        created: 1,
+      },
+    ];
+    const limited = applyHardLimits(stats, { needs_images: true }, live);
+    assert.ok(limited.some((s) => s.modelId === "google/gemini-2.5-flash"));
+    assert.ok(!limited.some((s) => s.modelId === "mistralai/mistral-small-3.1"));
+  });
 });

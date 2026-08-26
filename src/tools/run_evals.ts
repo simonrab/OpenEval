@@ -1,9 +1,9 @@
-import type Database from "better-sqlite3";
 import {
   recheckModelIds,
   validateRecheckNamedModel,
 } from "../ci/recheck.js";
 import {
+  agentError,
   costCapRequiredError,
   needMoreEvalsError,
   projectNotFoundError,
@@ -16,22 +16,17 @@ import {
   storeIdempotentResponse,
 } from "../eval-set.js";
 import { newRunId } from "../ids.js";
-import { missingKeysRefError, projectExists } from "../keys.js";
-import { DEFAULT_MODELS } from "../runner/openrouter.js";
+import { getJobLimits } from "../job.js";
+import { deriveWrapKey, missingKeysRefError, projectExists, readSecret } from "../keys.js";
+import { pickDefaultModels } from "../runner/catalog.js";
 import { hasEnoughTrustedEvals } from "../runner/worker.js";
 import { resolveMarkUrlForSet } from "./get_label_status.js";
 import type { ToolHandler } from "../dispatch.js";
 import { runEvalsOutputSchema, type runEvalsInputSchema } from "./schema.js";
+import { ErrorCode } from "./types.js";
 import type { z } from "zod";
 
 type RunEvalsInput = z.infer<typeof runEvalsInputSchema>;
-
-function resolveModels(models: string[] | null | undefined): string[] {
-  if (models && models.length > 0) {
-    return models;
-  }
-  return [...DEFAULT_MODELS];
-}
 
 function estimateCost(modelCount: number, evalCount: number): number {
   return Math.round(modelCount * evalCount * 0.05 * 100) / 100;
@@ -41,7 +36,38 @@ function estimateEta(modelCount: number, evalCount: number): number {
   return modelCount * evalCount * 3;
 }
 
-export const handleRunEvals: ToolHandler = (body, ctx) => {
+function noModelsFitError(): ReturnType<typeof agentError> {
+  return agentError({
+    code: ErrorCode.does_not_work,
+    message: "No current models fit the job limits",
+    retryable: false,
+    suggested_tool: "run_evals",
+    suggested_args: {},
+    failing_eval_ids: [],
+    next_action: {
+      tool: null,
+      args: {},
+      ask_human: "none of the models passed; see failing_eval_ids",
+    },
+  });
+}
+
+function catalogUnavailableError(): ReturnType<typeof agentError> {
+  return agentError({
+    code: ErrorCode.INVALID_INPUT,
+    message: "Could not list current models. Retry run_evals.",
+    retryable: true,
+    suggested_tool: "run_evals",
+    suggested_args: {},
+    next_action: {
+      tool: "run_evals",
+      args: {},
+      ask_human: null,
+    },
+  });
+}
+
+export const handleRunEvals: ToolHandler = async (body, ctx) => {
   const db = ctx.db;
   if (!db) {
     throw new Error("run_evals requires db on ToolContext");
@@ -100,10 +126,35 @@ export const handleRunEvals: ToolHandler = (body, ctx) => {
     };
   }
 
-  const models =
-    intent === "recheck" && input.named_model
-      ? recheckModelIds(input.named_model)
-      : resolveModels(input.models ?? undefined);
+  let models: string[];
+  if (intent === "recheck" && input.named_model) {
+    models = recheckModelIds(input.named_model);
+  } else if (input.models && input.models.length > 0) {
+    models = input.models;
+  } else {
+    const openRouter = ctx.openRouter;
+    if (!openRouter?.listModels || !ctx.apiKey) {
+      return { status: 400, body: catalogUnavailableError() };
+    }
+    let customerKey: string;
+    try {
+      customerKey = readSecret(db, deriveWrapKey(ctx.apiKey), input.keys_ref);
+    } catch {
+      return { status: 400, body: missingKeysRefError(input.project_id) };
+    }
+    let catalog;
+    try {
+      catalog = await openRouter.listModels(customerKey);
+    } catch {
+      return { status: 400, body: catalogUnavailableError() };
+    }
+    const limits = getJobLimits(db, input.eval_set_id);
+    const picked = pickDefaultModels(catalog, limits);
+    if (picked.length === 0) {
+      return { status: 400, body: noModelsFitError() };
+    }
+    models = picked.map((m) => m.id);
+  }
   const trustedEvals = members.filter((m) => m.status === "trusted");
   const runId = newRunId();
   const now = new Date().toISOString();

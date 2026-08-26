@@ -62,7 +62,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     v1.addHook("preHandler", createAuthHook(db));
     await registerProjects(v1, db);
     await registerKeys(v1, db, opts.apiKey);
-    await registerTools(v1, db, { baseUrl, apiKey: opts.apiKey });
+    await registerTools(v1, db, { baseUrl, apiKey: opts.apiKey, openRouter });
   }, { prefix: "/v1" });
 
   return app;

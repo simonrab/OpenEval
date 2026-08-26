@@ -9,6 +9,7 @@ import { handleRunEvals } from "./tools/run_evals.js";
 import { notBuiltError } from "./tools/not-built.js";
 import { isToolName, parseToolInput, TOOL_NAMES } from "./tools/schema.js";
 import { ErrorCode } from "./tools/types.js";
+import type { OpenRouterClient } from "./runner/openrouter.js";
 import type Database from "better-sqlite3";
 
 export type ToolContext = {
@@ -16,6 +17,7 @@ export type ToolContext = {
   db?: Database.Database;
   apiKey?: string;
   baseUrl?: string;
+  openRouter?: OpenRouterClient;
 };
 
 export type DispatchResult = {

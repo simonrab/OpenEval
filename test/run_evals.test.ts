@@ -253,4 +253,97 @@ describe("run_evals (J2/J4)", () => {
     assert.equal(b.statusCode, 200);
     assert.deepEqual(a.json(), b.json());
   });
+
+  it("default models is a current catalog short list, not the frozen five", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/tools/run_evals",
+      headers: authHeaders(),
+      payload: {
+        project_id: projectId,
+        eval_set_id: evalSetId,
+        max_eval_spend_usd: 1,
+        keys_ref: keysRef,
+        idempotency_key: "run-default-catalog",
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    const { run_id: runId } = res.json() as { run_id: string };
+    const db = new Database(sqlitePath, { readonly: true });
+    const row = db
+      .prepare("SELECT models FROM runs WHERE id = ?")
+      .get(runId) as { models: string };
+    db.close();
+    const models = JSON.parse(row.models) as string[];
+    assert.ok(models.length >= 1);
+    assert.ok(models.length <= 5);
+    assert.ok(models.includes("openai/gpt-4.1-nano"));
+    assert.ok(models.includes("google/gemini-2.5-flash"));
+    assert.ok(!models.includes("google/gemini-flash-1.5"));
+    assert.ok(!models.includes("anthropic/claude-3-haiku"));
+    assert.ok(!models.includes("mistralai/mistral-7b-instruct"));
+    assert.ok(!models.includes("meta-llama/llama-3.1-8b-instruct"));
+  });
+
+  it("default list drops models that cannot see images when the job needs images", async () => {
+    const db = new Database(sqlitePath);
+    db.prepare(
+      `UPDATE jobs SET limits = ? WHERE id = (
+         SELECT job_id FROM eval_sets WHERE id = ?
+       )`,
+    ).run(JSON.stringify({ needs_images: true }), evalSetId);
+    db.close();
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/tools/run_evals",
+      headers: authHeaders(),
+      payload: {
+        project_id: projectId,
+        eval_set_id: evalSetId,
+        max_eval_spend_usd: 1,
+        keys_ref: keysRef,
+        idempotency_key: "run-default-images",
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    const { run_id: runId } = res.json() as { run_id: string };
+    const read = new Database(sqlitePath, { readonly: true });
+    const row = read
+      .prepare("SELECT models FROM runs WHERE id = ?")
+      .get(runId) as { models: string };
+    read.close();
+    const models = JSON.parse(row.models) as string[];
+    assert.ok(models.includes("openai/gpt-4.1-nano"));
+    assert.ok(!models.includes("mistralai/mistral-small-3.1"));
+    assert.ok(!models.includes("meta-llama/llama-3.3-70b-instruct"));
+  });
+
+  it("returns does_not_work when no current model fits limits", async () => {
+    const db = new Database(sqlitePath);
+    db.prepare(
+      `UPDATE jobs SET limits = ? WHERE id = (
+         SELECT job_id FROM eval_sets WHERE id = ?
+       )`,
+    ).run(
+      JSON.stringify({ allowed_models: ["this-vendor-does-not-exist/*"] }),
+      evalSetId,
+    );
+    db.close();
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/tools/run_evals",
+      headers: authHeaders(),
+      payload: {
+        project_id: projectId,
+        eval_set_id: evalSetId,
+        max_eval_spend_usd: 1,
+        keys_ref: keysRef,
+        idempotency_key: "run-default-none-fit",
+      },
+    });
+    assert.equal(res.statusCode, 400);
+    assert.equal((res.json() as { code: string }).code, ErrorCode.does_not_work);
+  });
 });
