@@ -9,12 +9,17 @@ import { defaultSqlitePath, openDb } from "./db.js";
 import { registerAccept } from "./routes/accept.js";
 import { registerApprove } from "./routes/approve.js";
 import { registerCompileApprove } from "./routes/compile-approve.js";
+import { registerRolloutApprove } from "./routes/rollout-approve.js";
+import { registerSampleScreen } from "./routes/sample.js";
 import { registerMarkRoutes } from "./mark/app.js";
 import { registerHealth } from "./routes/health.js";
 import { registerKeys } from "./routes/keys.js";
 import { registerProjects } from "./routes/projects.js";
 import { registerReport } from "./routes/report.js";
+import { registerLiveReport } from "./routes/live-report.js";
 import { registerRuntimePolicies } from "./routes/runtime-policies.js";
+import { registerRuntimeSamples } from "./routes/runtime-samples.js";
+import { registerRuntimeStats } from "./routes/runtime-stats.js";
 import { registerTools } from "./routes/tools.js";
 import {
   createOpenRouterClient,
@@ -72,14 +77,19 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   await registerAccept(app, db, opts.apiKey);
   await registerApprove(app, db, opts.apiKey);
   await registerCompileApprove(app, db, opts.apiKey);
+  await registerRolloutApprove(app, db, opts.apiKey, baseUrl);
+  await registerSampleScreen(app, db, opts.apiKey, baseUrl);
   await registerMarkRoutes(app, db, opts.apiKey);
   await registerReport(app, db, opts.apiKey, baseUrl);
+  await registerLiveReport(app, db, opts.apiKey, baseUrl);
 
   await app.register(async (v1) => {
     v1.addHook("preHandler", createAuthHook(db));
     await registerProjects(v1, db);
     await registerKeys(v1, db, opts.apiKey);
     await registerRuntimePolicies(v1, db, opts.apiKey);
+    await registerRuntimeSamples(v1, db);
+    await registerRuntimeStats(v1, db);
     await registerTools(v1, db, { baseUrl, apiKey: opts.apiKey, openRouter });
   }, { prefix: "/v1" });
 

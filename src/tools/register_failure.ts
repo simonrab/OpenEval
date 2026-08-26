@@ -1,4 +1,3 @@
-import type Database from "better-sqlite3";
 import { projectNotFoundError, suiteNotFoundError } from "../errors.js";
 import {
   copyEvalSetForward,
@@ -13,7 +12,7 @@ import { newEvalId } from "../ids.js";
 import { attachImagePdfFiles } from "../eval-files.js";
 import { projectExists } from "../keys.js";
 import { buildMarkUrl, signMarkToken } from "../mark/tokens.js";
-import type { ToolHandler } from "../dispatch.js";
+import type { DispatchResult, ToolContext, ToolHandler } from "../dispatch.js";
 import {
   registerFailureOutputSchema,
   type registerFailureInputSchema,
@@ -36,21 +35,14 @@ function failureInputTruncated(
   return truncateInput(JSON.stringify(payload));
 }
 
-export const handleRegisterFailure: ToolHandler = (body, ctx) => {
+export function executeRegisterFailure(
+  input: RegisterInput,
+  ctx: ToolContext,
+): DispatchResult {
   const db = ctx.db;
   const baseUrl = ctx.baseUrl ?? "http://127.0.0.1:3000";
   if (!db) {
     throw new Error("register_failure requires db on ToolContext");
-  }
-
-  const input = body as RegisterInput;
-  const existing = getIdempotentResponse(
-    db,
-    "register_failure",
-    input.idempotency_key,
-  );
-  if (existing) {
-    return existing;
   }
 
   if (!projectExists(db, input.project_id)) {
@@ -147,14 +139,36 @@ export const handleRegisterFailure: ToolHandler = (body, ctx) => {
           },
   });
 
-  storeIdempotentResponse(
+  return { status: 200, body: output };
+}
+
+export const handleRegisterFailure: ToolHandler = (body, ctx) => {
+  const db = ctx.db;
+  if (!db) {
+    throw new Error("register_failure requires db on ToolContext");
+  }
+
+  const input = body as RegisterInput;
+  const existing = getIdempotentResponse(
     db,
     "register_failure",
     input.idempotency_key,
-    200,
-    output,
-    input.project_id,
   );
+  if (existing) {
+    return existing;
+  }
 
-  return { status: 200, body: output };
+  const result = executeRegisterFailure(input, ctx);
+  if (result.status === 200) {
+    storeIdempotentResponse(
+      db,
+      "register_failure",
+      input.idempotency_key,
+      200,
+      result.body,
+      input.project_id,
+    );
+  }
+
+  return result;
 };

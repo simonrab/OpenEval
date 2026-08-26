@@ -39,3 +39,11 @@ export function newPersonId(): string {
 export function newPolicyId(): string {
   return newId("pol_");
 }
+
+export function newSampleId(): string {
+  return newId("smp_");
+}
+
+export function newRolloutId(): string {
+  return newId("rlo_");
+}

@@ -195,14 +195,40 @@ CREATE TABLE IF NOT EXISTS policies (
   FOREIGN KEY (project_id) REFERENCES projects(id)
 );
 
--- Live L1: last full vs draft. GET serves last full only.
+-- Live L1 / L6: last full, draft, and optional canary. GET serves last full plus canary.
 CREATE TABLE IF NOT EXISTS project_live_state (
   project_id TEXT PRIMARY KEY,
   last_full_policy_id TEXT,
   draft_policy_id TEXT,
+  canary_policy_id TEXT,
+  canary_percent INTEGER,
+  rollback_target_policy_id TEXT,
+  hashed_request_count INTEGER NOT NULL DEFAULT 0,
+  canary_request_count INTEGER NOT NULL DEFAULT 0,
+  fallback_count INTEGER NOT NULL DEFAULT 0,
+  request_count INTEGER NOT NULL DEFAULT 0,
+  pii_blocked_count INTEGER NOT NULL DEFAULT 0,
+  last_known_loaded_at TEXT,
+  stats_updated_at TEXT,
   FOREIGN KEY (project_id) REFERENCES projects(id),
   FOREIGN KEY (last_full_policy_id) REFERENCES policies(id),
-  FOREIGN KEY (draft_policy_id) REFERENCES policies(id)
+  FOREIGN KEY (draft_policy_id) REFERENCES policies(id),
+  FOREIGN KEY (canary_policy_id) REFERENCES policies(id),
+  FOREIGN KEY (rollback_target_policy_id) REFERENCES policies(id)
+);
+
+-- Live L6: proposed canary / full / rollback. Apply is the HTML screen.
+CREATE TABLE IF NOT EXISTS live_rollouts (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  intent TEXT NOT NULL CHECK (intent IN ('canary', 'full', 'rollback')),
+  old_policy_id TEXT,
+  new_policy_id TEXT,
+  rollback_target_policy_id TEXT,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected')),
+  created_at TEXT NOT NULL,
+  decided_at TEXT,
+  FOREIGN KEY (project_id) REFERENCES projects(id)
 );
 
 CREATE TABLE IF NOT EXISTS policy_approvals (
@@ -210,4 +236,19 @@ CREATE TABLE IF NOT EXISTS policy_approvals (
   decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')),
   decided_at TEXT NOT NULL,
   FOREIGN KEY (policy_id) REFERENCES policies(id)
+);
+
+-- Live L4: redacted live misses. Capture is ingest, not a fifth tool.
+CREATE TABLE IF NOT EXISTS samples (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  policy_id TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  why TEXT NOT NULL CHECK (why IN ('vendor_error', 'timeout', 'app_reported')),
+  input_redacted TEXT NOT NULL,
+  output_redacted TEXT NOT NULL,
+  captured_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  dropped_at TEXT,
+  FOREIGN KEY (project_id) REFERENCES projects(id)
 );

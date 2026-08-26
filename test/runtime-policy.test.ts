@@ -158,19 +158,25 @@ describe("GET /v1/runtime/policies/:project_id", () => {
     });
 
     assert.equal(res.statusCode, 200);
-    const body = res.json() as Record<string, unknown>;
-    assert.equal(body.policy_id, stored.policy_id);
-    assert.equal(body.project_id, projectId);
-    assert.equal(body.version, 1);
-    assert.equal(body.previous_policy_id, null);
-    assert.equal(body.rec_id, stored.rec_id);
-    assert.equal(body.ste_id, stored.ste_id);
-    assert.equal(body.compiled_at, stored.compiled_at);
-    assert.deepEqual(body.primary, stored.primary);
-    assert.deepEqual(body.backups, []);
+    const body = res.json() as {
+      last_full: Record<string, unknown> & { policy_id: string; rec_id: string; ste_id: string; compiled_at: string; primary: unknown; backups: unknown; sig: string };
+      canary: unknown;
+      canary_percent: number;
+    };
+    assert.equal(body.last_full.policy_id, stored.policy_id);
+    assert.equal(body.last_full.project_id, projectId);
+    assert.equal(body.last_full.version, 1);
+    assert.equal(body.last_full.previous_policy_id, null);
+    assert.equal(body.last_full.rec_id, stored.rec_id);
+    assert.equal(body.last_full.ste_id, stored.ste_id);
+    assert.equal(body.last_full.compiled_at, stored.compiled_at);
+    assert.deepEqual(body.last_full.primary, stored.primary);
+    assert.deepEqual(body.last_full.backups, []);
+    assert.equal(body.last_full.canary, null);
     assert.equal(body.canary, null);
-    assert.match(String(body.sig), /^hmac-sha256:[0-9a-f]{64}$/);
-    assert.equal(verifyPolicy(apiKey, body as typeof stored), true);
+    assert.equal(body.canary_percent, 0);
+    assert.match(String(body.last_full.sig), /^hmac-sha256:[0-9a-f]{64}$/);
+    assert.equal(verifyPolicy(apiKey, body.last_full as typeof stored), true);
 
     const hex = createHash("sha256").update(res.body, "utf8").digest("hex");
     assert.equal(res.headers.etag, `"${hex}"`);
@@ -282,9 +288,13 @@ describe("GET /v1/runtime/policies/:project_id", () => {
       headers: authHeaders(),
     });
     assert.equal(res.statusCode, 200);
-    const body = res.json() as { policy_id: string; primary: { model_id: string } };
-    assert.equal(body.policy_id, first.policy_id);
-    assert.equal(body.primary.model_id, "openai/gpt-4.1-nano");
+    const body = res.json() as {
+      last_full: { policy_id: string; primary: { model_id: string } };
+      canary: unknown;
+    };
+    assert.equal(body.last_full.policy_id, first.policy_id);
+    assert.equal(body.last_full.primary.model_id, "openai/gpt-4.1-nano");
+    assert.equal(body.canary, null);
   });
 
   it("does not serve an unsigned row", async () => {

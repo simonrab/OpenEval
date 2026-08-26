@@ -9,6 +9,9 @@ export const TOOL_NAMES = [
   "register_failure",
   "get_eval_report",
   "compile_policy",
+  "get_live_report",
+  "promote_live_sample",
+  "propose_rollout",
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -22,6 +25,7 @@ export const ASK_HUMAN = [
   "open accept_url",
   "open mark_url",
   "open approve_url",
+  "open sample_url",
   "none of the models passed; see failing_eval_ids",
   "Pass a real prj_",
   "Pass a saved ste_",
@@ -49,6 +53,11 @@ export const ErrorCode = {
   NO_LAST_KNOWN_POLICY: "NO_LAST_KNOWN_POLICY",
   REC_NOT_APPROVED: "REC_NOT_APPROVED",
   STE_MISMATCH: "STE_MISMATCH",
+  PII_BLOCKED: "PII_BLOCKED",
+  CONTROL_PLANE_UNREACHABLE: "CONTROL_PLANE_UNREACHABLE",
+  NOT_A_SAMPLE: "NOT_A_SAMPLE",
+  POLICY_NOT_APPROVED: "POLICY_NOT_APPROVED",
+  CANARY_NOT_ACTIVE: "CANARY_NOT_ACTIVE",
 } as const;
 
 export type ErrorCodeName = (typeof ErrorCode)[keyof typeof ErrorCode];

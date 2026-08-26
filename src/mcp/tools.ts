@@ -12,6 +12,20 @@ export type McpToolDefinition = {
   zodInputSchema: (typeof toolInputSchemas)[ToolName];
 };
 
+const MCP_DESCRIPTIONS: Record<ToolName, string> = {
+  generate_eval_suite: "Write a first eval set from a job description.",
+  queue_for_labeling: "Queue evals that a person must mark.",
+  get_label_status: "Return mark counts for an eval set.",
+  run_evals: "Run models on a frozen eval set.",
+  recommend_models: "Name the cheapest fast model that still passes.",
+  register_failure: "Add a failure as a new eval on a new eval-set version.",
+  get_eval_report: "Return a short eval run report that fits in context.",
+  compile_policy: "Compile rec_ and ste_ into a pol_. This tool does not send live traffic.",
+  get_live_report: "Return live counts, last-known age, and paginated sample ids.",
+  promote_live_sample: "Turn a live sample into a v0 failure.",
+  propose_rollout: "Propose canary, full, or rollback. This tool does not apply.",
+};
+
 function toJsonSchema(name: ToolName): Record<string, unknown> {
   return zodToJsonSchema(toolInputSchemas[name], {
     $refStrategy: "none",
@@ -21,7 +35,7 @@ function toJsonSchema(name: ToolName): Record<string, unknown> {
 
 export const MCP_TOOLS: McpToolDefinition[] = TOOL_NAMES.map((name) => ({
   name,
-  description: `EvalRouter ${name}`,
+  description: MCP_DESCRIPTIONS[name],
   inputSchema: toJsonSchema(name),
   zodInputSchema: toolInputSchemas[name],
 }));

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Rollout approve</title>
+  <style>
+    body { font-family: sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+    .meta { color: #444; font-size: 0.9rem; }
+    button { margin-top: 1rem; padding: 0.4rem 0.8rem; margin-right: 0.5rem; }
+    dl { display: grid; grid-template-columns: 9rem 1fr; gap: 0.25rem 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Rollout approve</h1>
+  <p>This page shows a proposed rollout. The propose tool does not change live traffic.</p>
+  <p>Approve applies this intent. Reject leaves live traffic as it is.</p>
+  {{BANNER}}
+  <dl>
+    <dt>Old policy</dt><dd>{{OLD_POL}}</dd>
+    <dt>New policy</dt><dd>{{NEW_POL}}</dd>
+    <dt>Intent</dt><dd>{{INTENT}}</dd>
+    <dt>Intended split</dt><dd>{{INTENDED_SPLIT}}</dd>
+    <dt>Observed split</dt><dd>{{OBSERVED_SPLIT}}</dd>
+    <dt>Fallback rate</dt><dd>{{FALLBACK_RATE}}</dd>
+    <dt>Rollback target</dt><dd>{{ROLLBACK_TARGET}}</dd>
+    <dt>v0 report</dt><dd>{{REPORT_LINK}}</dd>
+  </dl>
+  <form method="post" action="/rollout-approve">
+    <input type="hidden" name="rollout_id" value="{{ROLLOUT_ID}}">
+    <input type="hidden" name="token" value="{{TOKEN}}">
+    <button type="submit" name="decision" value="approved">Approve</button>
+    <button type="submit" name="decision" value="rejected">Reject</button>
+    <button type="submit" name="decision" value="rollback">Rollback</button>
+  </form>
+</body>
+</html>

@@ -1,5 +1,8 @@
 import { agentError } from "./errors.js";
 import { handleCompilePolicy } from "./tools/compile_policy.js";
+import { handleGetLiveReport } from "./tools/get_live_report.js";
+import { handlePromoteLiveSample } from "./tools/promote_live_sample.js";
+import { handleProposeRollout } from "./tools/propose_rollout.js";
 import { handleGenerateEvalSuite } from "./tools/generate_eval_suite.js";
 import { handleGetEvalReport } from "./tools/get_eval_report.js";
 import { handleGetLabelStatus } from "./tools/get_label_status.js";
@@ -48,6 +51,9 @@ handlers.set("get_eval_report", handleGetEvalReport);
 handlers.set("recommend_models", handleRecommendModels);
 handlers.set("register_failure", handleRegisterFailure);
 handlers.set("compile_policy", handleCompilePolicy);
+handlers.set("get_live_report", handleGetLiveReport);
+handlers.set("promote_live_sample", handlePromoteLiveSample);
+handlers.set("propose_rollout", handleProposeRollout);
 
 function unknownToolError() {
   return agentError({

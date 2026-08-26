@@ -107,11 +107,25 @@ function validInput(name: (typeof TOOL_NAMES)[number]): Record<string, unknown> 
       };
     case "get_eval_report":
       return { project_id: "prj_1", run_id: "run_1" };
+    case "get_live_report":
+      return { project_id: "prj_1" };
     case "compile_policy":
       return {
         project_id: "prj_1",
         recommendation_id: "rec_1",
         eval_set_id: "ste_1",
+        idempotency_key: "idem-mcp-1",
+      };
+    case "promote_live_sample":
+      return {
+        project_id: "prj_1",
+        sample_id: "smp_1",
+        idempotency_key: "idem-mcp-1",
+      };
+    case "propose_rollout":
+      return {
+        project_id: "prj_1",
+        intent: "canary",
         idempotency_key: "idem-mcp-1",
       };
   }
@@ -144,8 +158,8 @@ async function postViaMcpClient(
 }
 
 describe("MCP tool registry", () => {
-  it("registers v0 seven tools and compile_policy with non-empty schemas", () => {
-    assert.equal(MCP_TOOLS.length, 8);
+  it("registers v0 seven tools plus four Live tools with non-empty schemas", () => {
+    assert.equal(MCP_TOOLS.length, 11);
     const v0 = [
       "generate_eval_suite",
       "queue_for_labeling",
@@ -159,6 +173,9 @@ describe("MCP tool registry", () => {
       assert.ok(MCP_TOOLS.find((t) => t.name === name), `missing MCP tool ${name}`);
     }
     assert.ok(MCP_TOOLS.find((t) => t.name === "compile_policy"));
+    assert.ok(MCP_TOOLS.find((t) => t.name === "get_live_report"));
+    assert.ok(MCP_TOOLS.find((t) => t.name === "promote_live_sample"));
+    assert.ok(MCP_TOOLS.find((t) => t.name === "propose_rollout"));
     for (const name of TOOL_NAMES) {
       const tool = MCP_TOOLS.find((t) => t.name === name);
       assert.ok(tool, `missing MCP tool ${name}`);

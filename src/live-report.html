@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Live report</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+    h1 { font-size: 1.25rem; }
+    dl { display: grid; grid-template-columns: 12rem 1fr; gap: 0.25rem 1rem; }
+    .meta { color: #555; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Live report</h1>
+  <p class="meta">This page shows counts only.</p>
+  <dl>
+    <dt>Live policy</dt><dd>{{POLICY_ID}}</dd>
+    <dt>Canary</dt><dd>{{CANARY}}</dd>
+    <dt>Intended split</dt><dd>{{INTENDED_SPLIT}}</dd>
+    <dt>Observed split</dt><dd>{{OBSERVED_SPLIT}}</dd>
+    <dt>Fallback rate</dt><dd>{{FALLBACK_RATE}}</dd>
+    <dt>Samples stored</dt><dd>{{STORED}}</dd>
+    <dt>Samples dropped</dt><dd>{{DROPPED}}</dd>
+    <dt>PII blocked</dt><dd>{{PII_BLOCKED}}</dd>
+    <dt>Last-known age</dt><dd>{{LAST_KNOWN_AGE}}</dd>
+  </dl>
+</body>
+</html>

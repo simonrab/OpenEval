@@ -18,6 +18,8 @@ export const MUTATING_TOOLS = [
   "recommend_models",
   "register_failure",
   "compile_policy",
+  "promote_live_sample",
+  "propose_rollout",
 ] as const satisfies readonly ToolName[];
 
 function isMutating(name: ToolName): boolean {
@@ -175,7 +177,7 @@ export const recommendModelsInputSchema = z
     }
   });
 
-const programCheckSchema = z
+export const programCheckSchema = z
   .object({
     kind: z.enum([
       "json_valid",
@@ -228,6 +230,31 @@ export const compilePolicyInputSchema = z
     recommendation_id: z.string().min(1),
     eval_set_id: z.string().min(1),
     idempotency_key: z.string().min(1),
+  })
+  .strict();
+
+export const promoteLiveSampleInputSchema = z
+  .object({
+    project_id: z.string().min(1),
+    sample_id: z.string().regex(/^smp_/),
+    program_check: programCheckSchema.optional(),
+    idempotency_key: z.string().min(1),
+  })
+  .strict();
+
+export const proposeRolloutInputSchema = z
+  .object({
+    project_id: z.string().min(1),
+    intent: z.enum(["canary", "full", "rollback"]),
+    idempotency_key: z.string().min(1),
+  })
+  .strict();
+
+export const getLiveReportInputSchema = z
+  .object({
+    project_id: z.string().min(1),
+    cursor: z.string().nullable().optional(),
+    limit: z.number().int().min(1).max(20).optional(),
   })
   .strict();
 
@@ -440,6 +467,65 @@ export const compilePolicyOutputSchema = z
   })
   .strict();
 
+export const promoteLiveSampleOutputSchema = z
+  .object({
+    eval_id: z.string(),
+    eval_set_id: z.string(),
+    previous_eval_set_id: z.string(),
+    version: z.number().int(),
+    score_how: z.enum(["code", "person"]),
+    trusted: z.boolean(),
+    status: z.string(),
+    old_eval_ids: z.array(z.string()),
+    mark_url: z.string().nullable(),
+    sample_url: z.string(),
+    live_traffic_changed: z.literal(false),
+    next_action: nextActionSchema,
+  })
+  .strict();
+
+export const proposeRolloutOutputSchema = z
+  .object({
+    rollout_id: z.string(),
+    approve_url: z.string(),
+    live_traffic_changed: z.literal(false),
+    next_action: nextActionSchema,
+  })
+  .strict();
+
+export const getLiveReportOutputSchema = z
+  .object({
+    policy_id: z.string().nullable(),
+    canary: z.boolean(),
+    intended_split: z.number(),
+    observed_split: z.number(),
+    fallback_rate: z.number(),
+    sample_counts: z
+      .object({
+        stored: z.number().int(),
+        dropped: z.number().int(),
+        pii_blocked: z.number().int(),
+      })
+      .strict(),
+    last_known_age_s: z.number().int().nullable(),
+    samples: z.array(
+      z
+        .object({
+          sample_id: z.string(),
+          why: z.enum(["vendor_error", "timeout", "app_reported"]),
+          input_redacted: z.string(),
+          output_redacted: z.string(),
+        })
+        .strict(),
+    ),
+    next_cursor: z.string().nullable(),
+    truncated: z.boolean(),
+    report_url: z.string(),
+    live_traffic_changed: z.literal(false),
+    next_action: nextActionSchema,
+  })
+  .strict();
+
 export const toolInputSchemas: Record<ToolName, z.ZodType> = {
   generate_eval_suite: generateEvalSuiteInputSchema,
   queue_for_labeling: queueForLabelingInputSchema,
@@ -449,6 +535,9 @@ export const toolInputSchemas: Record<ToolName, z.ZodType> = {
   register_failure: registerFailureInputSchema,
   get_eval_report: getEvalReportInputSchema,
   compile_policy: compilePolicyInputSchema,
+  get_live_report: getLiveReportInputSchema,
+  promote_live_sample: promoteLiveSampleInputSchema,
+  propose_rollout: proposeRolloutInputSchema,
 };
 
 export type ParseToolInputResult =

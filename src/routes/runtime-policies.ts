@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type Database from "better-sqlite3";
 import { noLastKnownPolicyError, projectNotFoundError } from "../errors.js";
 import { projectExists } from "../keys.js";
-import { formatEtag, getLastFullPolicy, normalizeEtag } from "../policy.js";
+import { formatEtag, getRuntimePolicyDocument, normalizeEtag } from "../policy.js";
 
 export async function registerRuntimePolicies(
   app: FastifyInstance,
@@ -15,19 +15,19 @@ export async function registerRuntimePolicies(
       return reply.code(404).send(projectNotFoundError(project_id));
     }
 
-    const row = getLastFullPolicy(db, apiKey, project_id);
-    if (!row) {
+    const doc = getRuntimePolicyDocument(db, apiKey, project_id);
+    if (!doc) {
       return reply.code(404).send(noLastKnownPolicyError(project_id));
     }
 
-    const etagHeader = formatEtag(row.etag);
+    const etagHeader = formatEtag(doc.etag);
     reply.header("etag", etagHeader);
 
     const incoming = normalizeEtag(request.headers["if-none-match"]);
-    if (incoming !== null && incoming === row.etag) {
+    if (incoming !== null && incoming === doc.etag) {
       return reply.code(304).send();
     }
 
-    return reply.type("application/json").send(row.body_json);
+    return reply.type("application/json").send(doc.bodyJson);
   });
 }

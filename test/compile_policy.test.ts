@@ -461,9 +461,13 @@ describe("compile_policy (R1)", () => {
 
     const res = await getPolicy();
     assert.equal(res.statusCode, 200);
-    const policy = res.json() as { policy_id: string; primary: { model_id: string } };
-    assert.equal(policy.policy_id, body.policy_id);
-    assert.equal(policy.primary.model_id, seeded.namedModelId);
+    const policy = res.json() as {
+      last_full: { policy_id: string; primary: { model_id: string } };
+      canary: unknown;
+    };
+    assert.equal(policy.last_full.policy_id, body.policy_id);
+    assert.equal(policy.last_full.primary.model_id, seeded.namedModelId);
+    assert.equal(policy.canary, null);
   });
 
   it("GET stays 404 after reject of the first policy", async () => {
@@ -514,9 +518,13 @@ describe("compile_policy (R1)", () => {
 
     const res = await getPolicy();
     assert.equal(res.statusCode, 200);
-    const policy = res.json() as { policy_id: string; primary: { model_id: string } };
-    assert.equal(policy.policy_id, body1.policy_id);
-    assert.equal(policy.primary.model_id, "openai/gpt-4.1-mini");
+    const policy = res.json() as {
+      last_full: { policy_id: string; primary: { model_id: string } };
+      canary: unknown;
+    };
+    assert.equal(policy.last_full.policy_id, body1.policy_id);
+    assert.equal(policy.last_full.primary.model_id, "openai/gpt-4.1-mini");
+    assert.equal(policy.canary, null);
   });
 
   it("does not call OpenRouter", async () => {

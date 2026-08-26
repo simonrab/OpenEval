@@ -18,6 +18,8 @@ import {
   registerFailureOutputSchema,
   runEvalsInputSchema,
   runEvalsOutputSchema,
+  promoteLiveSampleOutputSchema,
+  proposeRolloutOutputSchema,
   toolInputSchemas,
 } from "../src/tools/schema.js";
 import { ErrorCode } from "../src/tools/types.js";
@@ -29,9 +31,11 @@ const mutating = [
   "recommend_models",
   "register_failure",
   "compile_policy",
+  "promote_live_sample",
+  "propose_rollout",
 ] as const;
 
-const readOnly = ["get_label_status", "get_eval_report"] as const;
+const readOnly = ["get_label_status", "get_eval_report", "get_live_report"] as const;
 
 function validInput(name: (typeof TOOL_NAMES)[number]): Record<string, unknown> {
   switch (name) {
@@ -71,11 +75,25 @@ function validInput(name: (typeof TOOL_NAMES)[number]): Record<string, unknown> 
       };
     case "get_eval_report":
       return { project_id: "prj_1", run_id: "run_1" };
+    case "get_live_report":
+      return { project_id: "prj_1" };
     case "compile_policy":
       return {
         project_id: "prj_1",
         recommendation_id: "rec_1",
         eval_set_id: "ste_1",
+        idempotency_key: "idem-1",
+      };
+    case "promote_live_sample":
+      return {
+        project_id: "prj_1",
+        sample_id: "smp_1",
+        idempotency_key: "idem-1",
+      };
+    case "propose_rollout":
+      return {
+        project_id: "prj_1",
+        intent: "canary",
         idempotency_key: "idem-1",
       };
   }
@@ -92,12 +110,18 @@ describe("tool schemas", () => {
     "get_eval_report",
   ] as const;
 
-  it("registers the v0 seven tools and compile_policy", () => {
+  it("registers the v0 seven tools, compile_policy, get_live_report, promote_live_sample, and propose_rollout", () => {
     for (const name of v0Tools) {
       assert.ok((TOOL_NAMES as readonly string[]).includes(name));
     }
     assert.ok((TOOL_NAMES as readonly string[]).includes("compile_policy"));
-    assert.deepEqual([...TOOL_NAMES], [...v0Tools, "compile_policy"]);
+    assert.ok((TOOL_NAMES as readonly string[]).includes("get_live_report"));
+    assert.ok((TOOL_NAMES as readonly string[]).includes("promote_live_sample"));
+    assert.ok((TOOL_NAMES as readonly string[]).includes("propose_rollout"));
+    assert.deepEqual(
+      [...TOOL_NAMES],
+      [...v0Tools, "compile_policy", "get_live_report", "promote_live_sample", "propose_rollout"],
+    );
     for (const name of TOOL_NAMES) {
       assert.ok(toolInputSchemas[name]);
     }
@@ -388,6 +412,44 @@ describe("output schemas", () => {
         old_eval_ids: ["cas_1"],
         mark_url: null,
         next_action: { tool: "run_evals", args: {}, ask_human: null },
+      }).success,
+      true,
+    );
+  });
+
+  it("parses a promote_live_sample success payload with live_traffic_changed false", () => {
+    assert.equal(
+      promoteLiveSampleOutputSchema.safeParse({
+        eval_id: "cas_2",
+        eval_set_id: "ste_2",
+        previous_eval_set_id: "ste_1",
+        version: 4,
+        score_how: "code",
+        trusted: true,
+        status: "trusted",
+        old_eval_ids: ["cas_1"],
+        mark_url: null,
+        sample_url: "https://example.invalid/sample?sample_id=smp_1&token=signed",
+        live_traffic_changed: false,
+        next_action: { tool: "run_evals", args: {}, ask_human: null },
+      }).success,
+      true,
+    );
+  });
+
+  it("parses a propose_rollout success payload with live_traffic_changed false", () => {
+    assert.equal(
+      proposeRolloutOutputSchema.safeParse({
+        rollout_id: "rlo_1",
+        approve_url: "https://example.invalid/rollout-approve?rollout_id=rlo_1&token=signed",
+        live_traffic_changed: false,
+        next_action: {
+          tool: null,
+          args: {
+            approve_url: "https://example.invalid/rollout-approve?rollout_id=rlo_1&token=signed",
+          },
+          ask_human: "open approve_url",
+        },
       }).success,
       true,
     );

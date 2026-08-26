@@ -84,6 +84,77 @@ export function recNotApprovedError(recommendationId: string): AgentError {
   });
 }
 
+export function policyNotApprovedError(args: {
+  project_id: string;
+  approve_url?: string;
+}): AgentError {
+  const hasUrl = typeof args.approve_url === "string" && args.approve_url.length > 0;
+  return agentError({
+    code: ErrorCode.POLICY_NOT_APPROVED,
+    message: "A draft policy exists. It is not live.",
+    retryable: true,
+    suggested_tool: hasUrl ? null : "compile_policy",
+    suggested_args: hasUrl
+      ? { approve_url: args.approve_url }
+      : { project_id: args.project_id },
+    next_action: {
+      tool: hasUrl ? null : "compile_policy",
+      args: hasUrl
+        ? { approve_url: args.approve_url }
+        : { project_id: args.project_id },
+      ask_human: hasUrl ? "open approve_url" : null,
+    },
+  });
+}
+
+export function canaryNotActiveError(projectId: string): AgentError {
+  return agentError({
+    code: ErrorCode.CANARY_NOT_ACTIVE,
+    message: "There is no active canary.",
+    retryable: true,
+    suggested_tool: "propose_rollout",
+    suggested_args: { project_id: projectId, intent: "canary" },
+    next_action: {
+      tool: "propose_rollout",
+      args: { project_id: projectId, intent: "canary" },
+      ask_human: null,
+    },
+  });
+}
+
+export function notASampleError(args: {
+  project_id: string;
+}): AgentError {
+  const nextArgs = { project_id: args.project_id };
+  return agentError({
+    code: ErrorCode.NOT_A_SAMPLE,
+    message: "The id is not a sample.",
+    retryable: false,
+    suggested_tool: "get_live_report",
+    suggested_args: nextArgs,
+    next_action: {
+      tool: "get_live_report",
+      args: nextArgs,
+      ask_human: null,
+    },
+  });
+}
+
+export function piiBlockedError(): AgentError {
+  return agentError({
+    code: ErrorCode.PII_BLOCKED,
+    message: "Capture did not store the example.",
+    retryable: false,
+    suggested_tool: null,
+    suggested_args: {},
+    next_action: {
+      tool: null,
+      args: {},
+      ask_human: null,
+    },
+  });
+}
+
 export function steMismatchError(args: {
   project_id: string;
   recommendation_id: string;

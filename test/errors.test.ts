@@ -50,6 +50,25 @@ describe("error codes", () => {
     assert.equal(ErrorCode.STE_MISMATCH, "STE_MISMATCH");
     assert.ok(ERROR_CODES.includes("STE_MISMATCH"));
   });
+
+  it("includes PII_BLOCKED and CONTROL_PLANE_UNREACHABLE for Live samples", () => {
+    assert.equal(ErrorCode.PII_BLOCKED, "PII_BLOCKED");
+    assert.ok(ERROR_CODES.includes("PII_BLOCKED"));
+    assert.equal(ErrorCode.CONTROL_PLANE_UNREACHABLE, "CONTROL_PLANE_UNREACHABLE");
+    assert.ok(ERROR_CODES.includes("CONTROL_PLANE_UNREACHABLE"));
+  });
+
+  it("includes NOT_A_SAMPLE for Live promote", () => {
+    assert.equal(ErrorCode.NOT_A_SAMPLE, "NOT_A_SAMPLE");
+    assert.ok(ERROR_CODES.includes("NOT_A_SAMPLE"));
+  });
+
+  it("includes POLICY_NOT_APPROVED and CANARY_NOT_ACTIVE for Live rollout", () => {
+    assert.equal(ErrorCode.POLICY_NOT_APPROVED, "POLICY_NOT_APPROVED");
+    assert.ok(ERROR_CODES.includes("POLICY_NOT_APPROVED"));
+    assert.equal(ErrorCode.CANARY_NOT_ACTIVE, "CANARY_NOT_ACTIVE");
+    assert.ok(ERROR_CODES.includes("CANARY_NOT_ACTIVE"));
+  });
 });
 
 describe("agent error envelope", () => {
