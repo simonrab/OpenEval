@@ -17,6 +17,7 @@ import { extractDrafts, isExtractJob } from "../job-types/extract.js";
 import { imagePdfDrafts, isImagePdfJob } from "../job-types/image_pdf.js";
 import { isJsonObjectJob, jsonObjectDrafts } from "../job-types/json_object.js";
 import { isToneJob, toneDrafts } from "../job-types/tone.js";
+import { labeledExampleDrafts } from "../job-types/labeled.js";
 import {
   draftsFromWhatGoodMeans,
   hasPersonSignals,
@@ -94,6 +95,9 @@ function mergePersonDrafts(
 }
 
 function buildDrafts(input: GenerateInput): DraftEval[] | null {
+  if (input.labeled_examples && input.labeled_examples.length > 0) {
+    return labeledExampleDrafts(input.labeled_examples);
+  }
   const description = input.description;
   const sampleFiles = input.sample_files;
   const extras = {
@@ -303,14 +307,20 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
     const description =
       input.description ??
       JSON.stringify(input.what_good_means);
+    const limits = {
+      ...(input.limits ?? {}),
+      ...(input.system_prompt ? { system_prompt: input.system_prompt } : {}),
+    };
+    const limitsJson =
+      Object.keys(limits).length > 0 ? JSON.stringify(limits) : null;
     db.prepare(
       `INSERT INTO jobs (id, project_id, description, limits, created_at)
        VALUES (?, ?, ?, ?, ?)`,
     ).run(
       jobId,
       projectId,
-      description,
-      input.limits ? JSON.stringify(input.limits) : null,
+      description ?? "",
+      limitsJson,
       new Date().toISOString(),
     );
 
@@ -339,6 +349,7 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
         ...e,
         program_check: null,
         input_truncated: "",
+        form_spec: null,
       })),
       projectId,
       createdSet.evalSetId,

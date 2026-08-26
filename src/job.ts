@@ -17,3 +17,16 @@ export function getJobLimits(
   }
   return JSON.parse(row.limits) as JobLimits;
 }
+
+export function getJobSystemPrompt(
+  db: Database.Database,
+  evalSetId: string,
+): string | null {
+  const limits = getJobLimits(db, evalSetId);
+  const prompt = limits?.system_prompt;
+  if (typeof prompt !== "string") {
+    return null;
+  }
+  const text = prompt.trim();
+  return text.length > 0 ? text : null;
+}

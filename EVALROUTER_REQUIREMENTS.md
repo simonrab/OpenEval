@@ -28,6 +28,7 @@ It is not a second OpenRouter. It does not rewrite the prompt. It does not auto-
 ## 1. Words we will use
 
 - **Eval:** a check on one example. Input in. A score says whether the model did the job.
+- **Labeled example:** one example text, a human label for that text, and a program check on the model output.
 - **Code eval:** a program scores it. Examples: valid JSON, correct tool name, a field equals a known value, a check in the repo, a must-not-contain check. No person is needed on each run.
 - **Draft eval:** a suggested check. It is not trusted yet.
 - **Draft answer:** a suggested right answer or pass/fail a model wrote. It is not trusted.
@@ -171,7 +172,7 @@ Each job is Given / When / Then. Then is the done check.
 
 **Goal:** Describe the job. Get draft evals.
 
-**Given** a job description and optional sample files (and optional limits).
+**Given** a job description, or labeled examples. Sample files and limits are optional.
 
 **When** the agent calls `generate_eval_suite`.
 
@@ -182,6 +183,8 @@ Each job is Given / When / Then. Then is the done check.
 - which evals a program can score (`code`) vs which need a person (`person`)
 - a mark URL only if some evals need a person
 - `next_action`
+
+If `labeled_examples` is set, the tool writes one draft eval per example. It does not add library evals. It does not add rows from `what_good_means`.
 
 If the job type is known, reuse that type’s score methods and hard examples, and add the sample files.
 
@@ -379,7 +382,7 @@ Same JSON on the agent tool and on `POST /v1/tools/{name}`. Small output. `addit
 
 | Tool | Job | Notes |
 | --- | --- | --- |
-| `generate_eval_suite` | J1, J6 | Writes draft evals. Known job type: use library. Unknown: ask what good means, write pass/fail checks. Do not invent trusted answers. Do not run models. |
+| `generate_eval_suite` | J1, J6 | Writes draft evals. Labeled examples: one draft per example. Do not add library evals. Known job type: use library. Unknown: ask what good means, write pass/fail checks. Do not invent trusted answers. Do not run models. |
 | `queue_for_labeling` | J3 | Only evals a program cannot score. Returns mark URL. Skip if all are code evals. |
 | `get_label_status` | J3 | Counts: draft / code / waiting for person / trusted. Does not mark. |
 | `run_evals` | J4, J7 | Async. Cost cap. Customer keys. Does not send live user traffic. |
@@ -430,7 +433,7 @@ Developer accept of drafts is a screen. It is not one of the seven tool calls.
 
 **When to call:** First call for a new feature. Call again after `JOB_UNCLEAR` with what good means. Call again when adding work to an existing eval set (`intent: "add_feature"`).
 
-**Do:** Write draft evals. Known job type: use the library, plus sample files. Unknown job type: write pass/fail checks from what good means. Split code vs person. Tag computer-made examples `draft`. Do not invent trusted answers. Do not run models.
+**Do:** Write draft evals. If labeled examples are set, write one draft per example. Known job type: use the library, plus sample files. Unknown job type: write pass/fail checks from what good means. Split code vs person. Tag computer-made examples `draft`. Do not invent trusted answers. Do not run models.
 
 **Input:**
 
@@ -441,6 +444,14 @@ Developer accept of drafts is a screen. It is not one of the seven tool calls.
   "intent": "new_feature" | "add_feature",
   "description": "Invoice image → JSON line items",
   "sample_files": [{ "path": "fixtures/inv-001.json", "content": "..." }],
+  "labeled_examples": [
+    {
+      "text": "Payment failed for order 8831.",
+      "label": "Urgent",
+      "expected": { "path": "priority", "value": "urgent" }
+    }
+  ],
+  "system_prompt": "Return JSON with a priority field.",
   "limits": {
     "needs_images": true,
     "modalities": ["text", "image", "audio"],
@@ -458,7 +469,9 @@ Developer accept of drafts is a screen. It is not one of the seven tool calls.
 }
 ```
 
-Required: `description`, or `what_good_means` after `JOB_UNCLEAR`. `intent` defaults to `new_feature`. `sample_files` optional. `limits` optional. `eval_set_id` required for `add_feature`.
+Required: `description`, or `what_good_means` after `JOB_UNCLEAR`, or `labeled_examples`. `intent` defaults to `new_feature`. `sample_files` optional. `labeled_examples` optional. `system_prompt` optional. `limits` optional. `eval_set_id` required for `add_feature`.
+
+When `labeled_examples` is set, the tool writes one draft eval per example. It does not add library evals. It does not add rows from `what_good_means`. Each example has `text`, a human `label`, and `expected` (`path` and `value`) for a program check. The product stores `system_prompt` on the job when it is set. The runner sends that text as the system message. The runner sends the example `text` as the user message.
 
 **Output:**
 

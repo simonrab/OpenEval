@@ -37,9 +37,15 @@ export type StoredEval = {
   status: string;
 };
 
+export type ExampleLabel = {
+  text: string;
+  label: string;
+};
+
 export type MemberEval = StoredEval & {
   program_check: ProgramCheck | null;
   input_truncated: string;
+  form_spec: ExampleLabel | null;
 };
 
 export function truncateInput(text: string, max = INPUT_TRUNCATE): string {
@@ -202,6 +208,25 @@ export function getEvalSet(
   return row ?? null;
 }
 
+export function getJobDescription(
+  db: Database.Database,
+  evalSetId: string,
+): string | null {
+  const row = db
+    .prepare(
+      `SELECT j.description AS description
+       FROM eval_sets es
+       JOIN jobs j ON j.id = es.job_id
+       WHERE es.id = ?`,
+    )
+    .get(evalSetId) as { description: string } | undefined;
+  if (row == null || typeof row.description !== "string") {
+    return null;
+  }
+  const text = row.description.trim();
+  return text.length > 0 ? text : null;
+}
+
 export function listMembers(
   db: Database.Database,
   evalSetId: string,
@@ -209,7 +234,7 @@ export function listMembers(
   const rows = db
     .prepare(
       `SELECT e.id AS eval_id, e.title, e.score_how, e.status, e.program_check,
-              e.input_truncated
+              e.input_truncated, e.form_spec
        FROM eval_set_members m
        JOIN evals e ON e.id = m.eval_id
        WHERE m.eval_set_id = ?
@@ -222,6 +247,7 @@ export function listMembers(
     status: string;
     program_check: string | null;
     input_truncated: string;
+    form_spec: string | null;
   }>;
   return rows.map((row) => ({
     eval_id: row.eval_id,
@@ -232,7 +258,35 @@ export function listMembers(
       ? (JSON.parse(row.program_check) as ProgramCheck)
       : null,
     input_truncated: row.input_truncated,
+    form_spec: parseExampleLabel(row.form_spec),
   }));
+}
+
+function parseExampleLabel(raw: string | null): ExampleLabel | null {
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+    ) {
+      const rec = parsed as Record<string, unknown>;
+      const text = typeof rec.text === "string" ? rec.text : "";
+      if (
+        text.length > 0 &&
+        typeof rec.label === "string" &&
+        rec.label.length > 0
+      ) {
+        return { text, label: rec.label };
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 export function applyAcceptDecisions(

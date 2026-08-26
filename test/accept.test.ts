@@ -96,6 +96,40 @@ describe("accept screen (J1)", () => {
     return res.json() as GenerateSuccess;
   }
 
+  it("GET HTML states the job, the example text, and the label", async () => {
+    const genRes = await app.inject({
+      method: "POST",
+      url: "/v1/tools/generate_eval_suite",
+      headers: authHeaders(),
+      payload: {
+        description: "Classify each support ticket as Urgent or Later.",
+        labeled_examples: [
+          {
+            text: "Payment failed for order 8831.",
+            label: "Urgent",
+            expected: { path: "priority", value: "urgent" },
+          },
+        ],
+        idempotency_key: "idem-accept-plain-language",
+      },
+    });
+    assert.equal(genRes.statusCode, 200);
+    const gen = genRes.json() as GenerateSuccess;
+    const token = acceptToken(gen.eval_set_id);
+    const res = await app.inject({
+      method: "GET",
+      url: `/accept?eval_set_id=${encodeURIComponent(gen.eval_set_id)}&token=${token}`,
+    });
+    assert.equal(res.statusCode, 200);
+    const html = res.body;
+    assert.match(html, /Classify each support ticket as Urgent or Later/);
+    assert.match(html, /Urgent/);
+    assert.match(html, /Payment failed for order 8831/);
+    assert.doesNotMatch(html, /Keep this question/);
+    assert.doesNotMatch(html, /A program scores/);
+    assert.doesNotMatch(html, /code eval/);
+  });
+
   it("GET HTML shows draft evals and does not call them tests", async () => {
     const gen = await generateDemo();
     const token = acceptToken(gen.eval_set_id);

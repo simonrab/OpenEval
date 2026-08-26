@@ -7,8 +7,10 @@ import type Database from "better-sqlite3";
 import {
   applyAcceptDecisions,
   getEvalSet,
+  getJobDescription,
   listMembers,
   nextActionForSet,
+  type MemberEval,
 } from "../eval-set.js";
 import { registerFormParser } from "./form-parser.js";
 
@@ -62,37 +64,112 @@ function renderAcceptPage(opts: {
   evalSetId: string;
   version: number;
   token: string;
-  rowsHtml: string;
+  members: MemberEval[];
   banner: string;
+  jobDescription: string;
 }): string {
   const template = readFileSync(templatePath, "utf8");
+  const job =
+    opts.jobDescription.trim().length > 0
+      ? opts.jobDescription
+      : "No job text is stored for this eval set.";
+  const labeled = labeledMembers(opts.members);
+  const labels = uniqueLabels(opts.members);
+  const key =
+    labeled && labels.length > 0
+      ? `<p class="key">${labels
+          .map(
+            (label, i) =>
+              `<span class="badge ${badgeClass(i)}">${escapeHtml(label)}</span>`,
+          )
+          .join(" ")}</p>`
+      : "";
+  const hint = labeled
+    ? "Agree if the label is right."
+    : "Keep an example if it is a real check for this job.";
+  const foot = `Draft examples. Eval set ${opts.evalSetId} · version ${opts.version}. No model runs here.`;
   return template
+    .replaceAll("{{HEADING}}", "Review examples")
     .replaceAll("{{EVAL_SET_ID}}", escapeHtml(opts.evalSetId))
     .replaceAll("{{VERSION}}", String(opts.version))
     .replaceAll("{{TOKEN}}", escapeHtml(opts.token))
-    .replace("{{EVAL_ROWS}}", opts.rowsHtml)
+    .replaceAll("{{JOB_DESCRIPTION}}", escapeHtml(job))
+    .replace("{{KEY}}", key)
+    .replace("{{HINT}}", escapeHtml(hint))
+    .replace("{{BUTTON}}", "Save")
+    .replace("{{FOOT}}", escapeHtml(foot))
+    .replace("{{EVAL_ROWS}}", evalRowsHtml(opts.members))
     .replace("{{BANNER}}", opts.banner);
 }
 
-function evalRowsHtml(
-  members: Array<{
-    eval_id: string;
-    title: string;
-    score_how: string;
-    status: string;
-  }>,
-): string {
+function labeledMembers(members: MemberEval[]): boolean {
+  return members.some((m) => m.form_spec != null);
+}
+
+function uniqueLabels(members: MemberEval[]): string[] {
+  const seen: string[] = [];
+  for (const m of members) {
+    const label = m.form_spec?.label;
+    if (label && !seen.includes(label)) {
+      seen.push(label);
+    }
+  }
+  return seen;
+}
+
+function badgeClass(index: number): string {
+  return index % 2 === 0 ? "badge-a" : "badge-b";
+}
+
+function evalRowsHtml(members: MemberEval[]): string {
   if (members.length === 0) {
     return "<li>No drafts left on this eval set.</li>";
   }
+  if (labeledMembers(members)) {
+    return labeledRowsHtml(members);
+  }
+  return genericRowsHtml(members);
+}
+
+function labeledRowsHtml(members: MemberEval[]): string {
+  const labels = uniqueLabels(members);
+  return members
+    .filter((m) => m.form_spec != null)
+    .map((m) => {
+      const id = escapeHtml(m.eval_id);
+      const spec = m.form_spec!;
+      const badgeCls = badgeClass(Math.max(0, labels.indexOf(spec.label)));
+      const quote = escapeHtml(spec.text);
+      return `<li class="card">
+  <span class="badge ${badgeCls}">${escapeHtml(spec.label)}</span>
+  <p class="quote">${quote}</p>
+  <div class="choices">
+    <label><input type="radio" name="decision_${id}" value="accept" checked> Agree</label>
+    <label><input type="radio" name="decision_${id}" value="reject"> Wrong</label>
+  </div>
+</li>`;
+    })
+    .join("\n");
+}
+
+function genericRowsHtml(members: MemberEval[]): string {
   return members
     .map((m) => {
       const id = escapeHtml(m.eval_id);
-      return `<li>
-  <p><strong>${escapeHtml(m.title)}</strong></p>
-  <p class="meta">${escapeHtml(m.score_how)} eval · ${escapeHtml(m.status)}</p>
-  <label><input type="radio" name="decision_${id}" value="accept"${m.score_how === "code" ? " checked" : ""}> Accept</label>
-  <label><input type="radio" name="decision_${id}" value="reject"${m.score_how === "code" ? "" : " checked"}> Reject</label>
+      const title = escapeHtml(m.title);
+      const quote =
+        m.input_truncated && m.input_truncated !== m.title
+          ? `<p class="quote">${escapeHtml(m.input_truncated)}</p>`
+          : "";
+      const acceptChecked = m.score_how === "code" ? " checked" : "";
+      const rejectChecked = m.score_how === "code" ? "" : " checked";
+      return `<li class="card">
+  <p class="claim">${title}</p>
+  ${quote}
+  <div class="choices">
+    <label><input type="radio" name="decision_${id}" value="accept"${acceptChecked}> Accept</label>
+    <label><input type="radio" name="decision_${id}" value="reject"${rejectChecked}> Reject</label>
+  </div>
 </li>`;
     })
     .join("\n");
@@ -171,8 +248,9 @@ export async function registerAccept(
       evalSetId,
       version: set.version,
       token: query.token ?? "",
-      rowsHtml: evalRowsHtml(members),
+      members,
       banner: "",
+      jobDescription: getJobDescription(db, evalSetId) ?? "",
     });
     return reply.type("text/html").send(html);
   });
@@ -220,8 +298,9 @@ export async function registerAccept(
       evalSetId: parsed.evalSetId,
       version: set.version,
       token: parsed.token ?? "",
-      rowsHtml: evalRowsHtml(members),
-      banner: `<p>Saved. Kept code evals are trusted. Rejected drafts were dropped. next_action.tool = ${escapeHtml(next_action.tool ?? "")}</p>`,
+      members,
+      banner: `<p>Saved. next_action.tool = ${escapeHtml(next_action.tool ?? "")}</p>`,
+      jobDescription: getJobDescription(db, parsed.evalSetId) ?? "",
     });
     return reply.type("text/html").send(html);
   });

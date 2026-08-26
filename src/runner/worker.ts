@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import { deriveWrapKey, readSecret } from "../keys.js";
 import { listMembers, type MemberEval } from "../eval-set.js";
 import { getJobGoodMeans } from "../mark/store.js";
+import { getJobSystemPrompt } from "../job.js";
 import { scoreProgramCheck } from "../scoring/index.js";
 import { scoreTrustedPersonMark } from "../scoring/person.js";
 import { ErrorCode } from "../tools/types.js";
@@ -116,6 +117,7 @@ export async function processRun(opts: WorkerOptions, runId: string): Promise<vo
   const members = listMembers(opts.db, run.eval_set_id);
   const evals = evalsForRun(opts.db, members);
   const mustNever = getJobGoodMeans(opts.db, run.eval_set_id)?.must_never;
+  const systemPrompt = getJobSystemPrompt(opts.db, run.eval_set_id) ?? undefined;
   const wrapKey = deriveWrapKey(opts.apiKey);
   let customerKey: string;
   if (!run.keys_ref) {
@@ -148,6 +150,7 @@ export async function processRun(opts: WorkerOptions, runId: string): Promise<vo
           model: modelId,
           prompt: ev.input_truncated,
           apiKey: customerKey,
+          systemPrompt,
         });
         content = result.content;
         timeMs = result.time_ms;

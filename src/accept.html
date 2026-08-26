@@ -2,18 +2,31 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Accept draft evals</title>
+  <title>{{HEADING}}</title>
   <style>
-    body { font-family: sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
-    li { margin: 1rem 0; list-style: none; border-bottom: 1px solid #ddd; padding-bottom: 0.75rem; }
-    .meta { color: #444; font-size: 0.9rem; }
-    button { margin-top: 1rem; padding: 0.4rem 0.8rem; }
+    body { font-family: sans-serif; max-width: 36rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.45; color: #111; }
+    h1 { font-size: 1.35rem; margin-bottom: 0.5rem; }
+    .lede { margin: 0.4rem 0 1rem; }
+    .key { display: flex; gap: 0.75rem; margin: 0 0 1.25rem; }
+    .key span { font-size: 0.85rem; padding: 0.2rem 0.5rem; border-radius: 0.2rem; }
+    .badge { display: inline-block; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 0.15rem 0.45rem; border-radius: 0.2rem; }
+    .badge-a { background: #111; color: #fff; }
+    .badge-b { background: #ddd; color: #111; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li.card { border: 1px solid #ddd; padding: 0.9rem 1rem; margin: 0 0 0.75rem; }
+    li.card p { margin: 0.4rem 0 0; }
+    .claim { font-size: 1.05rem; }
+    .quote { color: #444; font-size: 0.95rem; }
+    .choices { margin-top: 0.7rem; display: flex; gap: 1rem; }
+    .foot { color: #666; font-size: 0.8rem; margin-top: 1.5rem; }
+    button { margin: 0.5rem 0 1rem; padding: 0.45rem 0.9rem; }
   </style>
 </head>
 <body>
-  <h1>Draft evals</h1>
-  <p>Eval set {{EVAL_SET_ID}} · version {{VERSION}}</p>
-  <p>Accept code evals to trust them. Rejected drafts are dropped from this set. No model is run here.</p>
+  <h1>{{HEADING}}</h1>
+  <p class="lede">{{JOB_DESCRIPTION}}</p>
+  {{KEY}}
+  <p>{{HINT}}</p>
   {{BANNER}}
   <form method="post" action="/accept">
     <input type="hidden" name="eval_set_id" value="{{EVAL_SET_ID}}">
@@ -21,7 +34,8 @@
     <ul>
       {{EVAL_ROWS}}
     </ul>
-    <button type="submit">Save decisions</button>
+    <button type="submit">{{BUTTON}}</button>
   </form>
+  <p class="foot">{{FOOT}}</p>
 </body>
 </html>

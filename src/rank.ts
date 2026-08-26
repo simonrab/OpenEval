@@ -11,6 +11,7 @@ export type JobLimits = {
   max_spend_usd_per_1k?: number;
   allowed_models?: string[];
   excluded_models?: string[];
+  system_prompt?: string;
 };
 
 export type RunResultRow = {

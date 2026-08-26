@@ -35,6 +35,19 @@ const sampleFileSchema = z
   })
   .strict();
 
+const labeledExampleSchema = z
+  .object({
+    text: z.string().min(1),
+    label: z.string().min(1),
+    expected: z
+      .object({
+        path: z.string().min(1),
+        value: z.unknown(),
+      })
+      .strict(),
+  })
+  .strict();
+
 const limitsSchema = z
   .object({
     needs_images: z.boolean().optional(),
@@ -61,6 +74,8 @@ export const generateEvalSuiteInputSchema = z
     intent: z.enum(["new_feature", "add_feature"]).optional(),
     description: z.string().optional(),
     sample_files: z.array(sampleFileSchema).optional(),
+    labeled_examples: z.array(labeledExampleSchema).optional(),
+    system_prompt: z.string().min(1).optional(),
     limits: limitsSchema.optional(),
     what_good_means: whatGoodMeansSchema.nullable().optional(),
     size: z.enum(["smoke", "standard"]).optional(),
@@ -72,11 +87,12 @@ export const generateEvalSuiteInputSchema = z
     const hasDescription =
       typeof val.description === "string" && val.description.length > 0;
     const hasGood = val.what_good_means != null;
+    const hasLabeled = (val.labeled_examples?.length ?? 0) > 0;
     const retiring = (val.retire_eval_ids?.length ?? 0) > 0;
-    if (!hasDescription && !hasGood && !retiring) {
+    if (!hasDescription && !hasGood && !hasLabeled && !retiring) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "description or what_good_means is required",
+        message: "description, what_good_means, or labeled_examples is required",
       });
     }
     if (

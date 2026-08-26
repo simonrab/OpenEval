@@ -226,6 +226,34 @@ describe("input shapes", () => {
     assert.equal(parsed.success, true);
   });
 
+  it("accepts generate_eval_suite with labeled_examples and no description", () => {
+    const parsed = generateEvalSuiteInputSchema.safeParse({
+      labeled_examples: [
+        {
+          text: "Payment failed for order 8831.",
+          label: "Urgent",
+          expected: { path: "priority", value: "urgent" },
+        },
+      ],
+      idempotency_key: "idem-1",
+    });
+    assert.equal(parsed.success, true);
+  });
+
+  it("rejects labeled_examples that use line instead of text", () => {
+    const parsed = generateEvalSuiteInputSchema.safeParse({
+      labeled_examples: [
+        {
+          line: "Payment failed for order 8831.",
+          label: "Urgent",
+          expected: { path: "priority", value: "urgent" },
+        },
+      ],
+      idempotency_key: "idem-1",
+    });
+    assert.equal(parsed.success, false);
+  });
+
   it("requires eval_set_id when generate_eval_suite intent is add_feature", () => {
     const parsed = generateEvalSuiteInputSchema.safeParse({
       description: "add a field",

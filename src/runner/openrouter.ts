@@ -14,6 +14,7 @@ export type OpenRouterClient = {
     model: string;
     prompt: string;
     apiKey: string;
+    systemPrompt?: string;
   }): Promise<ChatCompletionResult>;
   listModels?(apiKey: string): Promise<CatalogModel[]>;
 };
@@ -61,8 +62,14 @@ export function createOpenRouterClient(
   fetchFn: typeof fetch = fetch,
 ): OpenRouterClient {
   return {
-    async chatCompletion({ model, prompt, apiKey }) {
+    async chatCompletion({ model, prompt, apiKey, systemPrompt }) {
       const started = Date.now();
+      const messages = [
+        ...(systemPrompt && systemPrompt.length > 0
+          ? [{ role: "system" as const, content: systemPrompt }]
+          : []),
+        { role: "user" as const, content: prompt },
+      ];
       const res = await fetchFn("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -72,7 +79,7 @@ export function createOpenRouterClient(
         },
         body: JSON.stringify({
           model,
-          messages: [{ role: "user", content: prompt }],
+          messages,
         }),
       });
       if (!res.ok) {
@@ -171,8 +178,9 @@ export function createMockOpenRouter(
   catalog: CatalogModel[] = MOCK_CATALOG,
 ): OpenRouterClient {
   return {
-    async chatCompletion({ model, prompt, apiKey }) {
+    async chatCompletion({ model, prompt, apiKey, systemPrompt }) {
       void apiKey;
+      void systemPrompt;
       if (typeof responses === "function") {
         return responses(model, prompt);
       }
