@@ -23,17 +23,43 @@ export function getStoredRecommendation(
   return row ?? null;
 }
 
+/** True when `evalSetId` is `ancestorEvalSetId` or a copy-forward descendant. */
+function evalSetIsSameOrDescendantOf(
+  db: Database.Database,
+  evalSetId: string,
+  ancestorEvalSetId: string,
+): boolean {
+  const seen = new Set<string>();
+  const stmt = db.prepare(
+    `SELECT previous_eval_set_id FROM eval_sets WHERE id = ?`,
+  );
+  let current: string | null = evalSetId;
+  while (current) {
+    if (seen.has(current)) {
+      return false;
+    }
+    if (current === ancestorEvalSetId) {
+      return true;
+    }
+    seen.add(current);
+    const row = stmt.get(current) as
+      | { previous_eval_set_id: string | null }
+      | undefined;
+    current = row?.previous_eval_set_id ?? null;
+  }
+  return false;
+}
+
 export function validateRecheckNamedModel(
   db: Database.Database,
   evalSetId: string,
   namedModel: NamedModelRef,
 ): AgentError | null {
   const rec = getStoredRecommendation(db, namedModel.rec_id);
-  if (
-    !rec ||
-    rec.eval_set_id !== evalSetId ||
-    rec.named_model_id !== namedModel.model_id
-  ) {
+  if (!rec || rec.named_model_id !== namedModel.model_id) {
+    return namedModelMismatchError();
+  }
+  if (!evalSetIsSameOrDescendantOf(db, evalSetId, rec.eval_set_id)) {
     return namedModelMismatchError();
   }
   return null;

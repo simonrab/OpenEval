@@ -211,32 +211,6 @@ describe("M7 mixed-job loop", () => {
     };
     assert.notEqual(failure.eval_set_id, suite.eval_set_id);
 
-    const recDb = new Database(sqlitePath);
-    const now = new Date().toISOString();
-    recDb.prepare(
-      `INSERT INTO runs
-        (id, project_id, eval_set_id, eval_set_version, status, code, models,
-         max_eval_spend_usd, keys_ref, intent, named_model, new_failures,
-         spend_usd, idempotency_key, created_at, updated_at)
-       VALUES ('run_m7_v2seed', ?, ?, 2, 'succeeded', NULL, ?, 5, ?, 'new_feature',
-               NULL, NULL, 0.2, 'm7-v2-seed', ?, ?)`,
-    ).run(
-      suite.project_id,
-      failure.eval_set_id,
-      JSON.stringify([rec.named_model.id]),
-      keysRef,
-      now,
-      now,
-    );
-    recDb.prepare(
-      `INSERT INTO recommendations
-        (id, project_id, eval_set_id, run_id, intent, named_model_id,
-         backup_model_ids, quality_json, time_json, cost_usd, failing_eval_ids, created_at)
-       VALUES ('rec_m7_v2', ?, ?, 'run_m7_v2seed', 'new_feature', ?, '[]',
-               '{"n_pass":1,"n_fail":0}', '{"p50":100,"p95":200}', 0.2, '[]', ?)`,
-    ).run(suite.project_id, failure.eval_set_id, rec.named_model.id, now);
-    recDb.close();
-
     const oldRecheck = await app.inject({
       method: "POST",
       url: "/v1/tools/run_evals",
@@ -273,7 +247,10 @@ describe("M7 mixed-job loop", () => {
         max_eval_spend_usd: 5,
         keys_ref: keysRef,
         intent: "recheck",
-        named_model: { rec_id: "rec_m7_v2", model_id: rec.named_model.id },
+        named_model: {
+          rec_id: rec.recommendation_id,
+          model_id: rec.named_model.id,
+        },
         idempotency_key: "m7-recheck-new",
       },
     });

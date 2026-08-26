@@ -185,7 +185,11 @@ export const registerFailureInputSchema = z
     input: z
       .object({
         prompt: z.string(),
-        files: z.array(z.object({ path: z.string() }).strict()).optional(),
+        files: z
+          .array(
+            z.object({ path: z.string(), content: z.string().optional() }).strict(),
+          )
+          .optional(),
       })
       .strict(),
     output: z.record(z.unknown()).optional(),

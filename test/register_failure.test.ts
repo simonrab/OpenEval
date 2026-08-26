@@ -325,31 +325,6 @@ describe("register_failure (J5)", () => {
       })
     ).json() as RegisterSuccess;
 
-    const db2 = new Database(sqlitePath);
-    db2.prepare(
-      `INSERT INTO runs
-        (id, project_id, eval_set_id, eval_set_version, status, code, models,
-         max_eval_spend_usd, keys_ref, intent, named_model, new_failures,
-         spend_usd, idempotency_key, created_at, updated_at)
-       VALUES ('run_j5_v2', ?, ?, 2, 'succeeded', NULL, ?, 5, ?, 'new_feature',
-               NULL, NULL, 0.2, 'seed-j5-v2', ?, ?)`,
-    ).run(
-      projectId,
-      registered.eval_set_id,
-      JSON.stringify([namedModelId]),
-      keysRef,
-      now,
-      now,
-    );
-    db2.prepare(
-      `INSERT INTO recommendations
-        (id, project_id, eval_set_id, run_id, intent, named_model_id,
-         backup_model_ids, quality_json, time_json, cost_usd, failing_eval_ids, created_at)
-       VALUES ('rec_j5_v2', ?, ?, 'run_j5_v2', 'new_feature', ?, '[]',
-               '{"n_pass":6,"n_fail":0}', '{"p50":100,"p95":200}', 0.2, '[]', ?)`,
-    ).run(projectId, registered.eval_set_id, namedModelId, now);
-    db2.close();
-
     const oldRun = await app.inject({
       method: "POST",
       url: "/v1/tools/run_evals",
@@ -387,7 +362,7 @@ describe("register_failure (J5)", () => {
         max_eval_spend_usd: 5,
         keys_ref: keysRef,
         intent: "recheck",
-        named_model: { rec_id: "rec_j5_v2", model_id: namedModelId },
+        named_model: { rec_id: recId, model_id: namedModelId },
         idempotency_key: "recheck-j5-new",
       },
     });

@@ -3,7 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
+import { signMarkToken } from "../src/mark/tokens.js";
 import { buildApp } from "../src/server.js";
 import {
   generateEvalSuiteOutputSchema,
@@ -66,11 +68,13 @@ async function postGenerate(
 describe("generate_eval_suite (J1)", () => {
   let app: FastifyInstance;
   let dir: string;
+  let sqlitePath: string;
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "evalrouter-generate-"));
+    sqlitePath = join(dir, "evalrouter.sqlite");
     app = await buildApp({
-      sqlitePath: join(dir, "evalrouter.sqlite"),
+      sqlitePath,
       apiKey,
     });
   });
@@ -259,5 +263,56 @@ describe("generate_eval_suite (J1)", () => {
     assert.equal(res.statusCode, 200);
     const body = res.json() as GenerateSuccess;
     assert.ok(body.counts.total >= 2);
+  });
+
+  it("attaches a PNG sample file to person evals", async () => {
+    const pngB64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const res = await postGenerate(app, {
+      description: "Return JSON with line_items and a warm friendly tone",
+      sample_files: [{ path: "fixtures/invoice.png", content: pngB64 }],
+      idempotency_key: "idem-png-person",
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as GenerateSuccess;
+    assert.ok(body.n_person > 0);
+
+    const db = new Database(sqlitePath);
+    const person = db
+      .prepare(
+        `SELECT e.id FROM eval_set_members m JOIN evals e ON e.id = m.eval_id
+         WHERE m.eval_set_id = ? AND e.score_how = 'person' LIMIT 1`,
+      )
+      .get(body.eval_set_id) as { id: string };
+    const file = db
+      .prepare(`SELECT path, content FROM eval_files WHERE eval_id = ?`)
+      .get(person.id) as { path: string; content: Buffer } | undefined;
+    db.close();
+    assert.ok(file, "person eval should have an eval_files row");
+    assert.equal(file.path, "fixtures/invoice.png");
+    const bytes = Buffer.isBuffer(file.content)
+      ? file.content
+      : Buffer.from(file.content ?? []);
+    assert.ok(bytes.length > 0);
+
+    const queued = await app.inject({
+      method: "POST",
+      url: "/v1/tools/queue_for_labeling",
+      headers: authHeaders(),
+      payload: {
+        project_id: body.project_id,
+        eval_set_id: body.eval_set_id,
+        idempotency_key: "idem-png-queue",
+      },
+    });
+    assert.equal(queued.statusCode, 200);
+
+    const token = signMarkToken(apiKey, body.eval_set_id);
+    const page = await app.inject({
+      method: "GET",
+      url: `/mark?eval_set_id=${encodeURIComponent(body.eval_set_id)}&token=${token}`,
+    });
+    assert.equal(page.statusCode, 200);
+    assert.match(page.body, /<img/);
   });
 });

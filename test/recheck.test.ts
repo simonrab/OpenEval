@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import { validateRecheckNamedModel } from "../src/ci/recheck.js";
+import { copyEvalSetForward } from "../src/eval-set-copy.js";
 import { createMockOpenRouter } from "../src/runner/openrouter.js";
 import { buildApp } from "../src/server.js";
 import { listMembers } from "../src/eval-set.js";
@@ -173,6 +174,20 @@ describe("recheck (J7)", () => {
     db.close();
     assert.ok(err);
     assert.equal(err!.code, ErrorCode.NAMED_MODEL_MISMATCH);
+  });
+
+  it("validateRecheckNamedModel allows rec from previous eval set after copy-forward", () => {
+    const db = new Database(sqlitePath);
+    const copied = copyEvalSetForward(db, {
+      projectId,
+      sourceEvalSetId: evalSetId,
+    });
+    const err = validateRecheckNamedModel(db, copied.newEvalSetId, {
+      rec_id: recId,
+      model_id: namedModelId,
+    });
+    db.close();
+    assert.equal(err, null);
   });
 
   it("recheck runs only the named model and passes with same scoring", async () => {
