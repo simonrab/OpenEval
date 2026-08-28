@@ -240,6 +240,66 @@ describe("input shapes", () => {
     assert.equal(parsed.success, true);
   });
 
+  it("accepts generate_eval_suite with archetypes and evidence", () => {
+    const parsed = generateEvalSuiteInputSchema.safeParse({
+      archetype_ids: ["output_contract", "custom:domain_route"],
+      custom_archetypes: [
+        {
+          id: "custom:domain_route",
+          name: "Domain route",
+          measures: "Domain label quality.",
+          applies_when: "The output names one route.",
+          required_evidence: ["labels"],
+          scorer_primitives: ["field_equals"],
+          human_mark_path: "Use person mark when policy is unclear.",
+          examples: ["Route to billing."],
+        },
+      ],
+      evidence: {
+        schemas: [
+          {
+            name: "response",
+            fields: ["label", "reason"],
+            schema: {
+              type: "object",
+              required: ["label"],
+              properties: { label: { type: "string" } },
+            },
+          },
+        ],
+        labels: ["billing", "support"],
+        user_notes: ["Use the closed label set."],
+      },
+      idempotency_key: "idem-archetype",
+    });
+    assert.equal(parsed.success, true);
+  });
+
+  it("accepts every V1 program check kind", () => {
+    const kinds = [
+      "json_schema",
+      "regex_match",
+      "numeric_close",
+      "set_equals",
+      "tool_args",
+      "trace_rule",
+      "citation_support",
+      "retrieval_contains",
+      "pairwise_equals",
+    ];
+    for (const kind of kinds) {
+      assert.equal(
+        registerFailureInputSchema.safeParse({
+          project_id: "prj_1",
+          input: { prompt: "bad example" },
+          program_check: { kind, expected: {} },
+          idempotency_key: `idem-${kind}`,
+        }).success,
+        true,
+      );
+    }
+  });
+
   it("rejects labeled_examples that use line instead of text", () => {
     const parsed = generateEvalSuiteInputSchema.safeParse({
       labeled_examples: [
@@ -363,11 +423,15 @@ describe("output schemas", () => {
           title: "JSON has line_items[]",
           score_how: "code",
           status: "draft",
+          archetype_id: "output_contract",
+          scorer_primitive: "field_equals",
         },
       ],
       n_code: 8,
       n_person: 2,
       n_draft: 10,
+      registry_version: "evalrouter-archetypes-v1",
+      archetype_ids_used: ["output_contract"],
       accept_url: "https://example.invalid/accept?token=signed",
       counts: {
         draft: 10,
@@ -590,6 +654,8 @@ describe("output schemas", () => {
             title: "JSON has total_cents",
             passed: false,
             reason_short: "field missing",
+            archetype_id: "output_contract",
+            scorer_primitive: "field_equals",
           },
         ],
         next_cursor: null,

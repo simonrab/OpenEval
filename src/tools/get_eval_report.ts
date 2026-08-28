@@ -228,6 +228,8 @@ export function buildReport(
       title: r.title,
       passed: r.passed,
       reason_short: r.reason_short,
+      archetype_id: r.archetype_id,
+      scorer_primitive: r.scorer_primitive,
     })),
     next_cursor: hasMore ? encodeCursor(nextOffset) : null,
     truncated: hasMore,
@@ -310,6 +312,8 @@ function aggregateResults(
   title: string;
   passed: boolean;
   reason_short: string;
+  archetype_id: string | null;
+  scorer_primitive: string | null;
 }> {
   const byEval = new Map<string, ReturnType<typeof listRunResults>>();
   const titleById = new Map(members.map((m) => [m.eval_id, m.title]));
@@ -328,6 +332,8 @@ function aggregateResults(
     title: string;
     passed: boolean;
     reason_short: string;
+    archetype_id: string | null;
+    scorer_primitive: string | null;
   }> = [];
   for (const member of members) {
     const rows = byEval.get(member.eval_id);
@@ -348,6 +354,8 @@ function aggregateResults(
         title: member.title,
         passed: true,
         reason_short: truncateReason(reason),
+        archetype_id: member.archetype_id,
+        scorer_primitive: member.scorer_primitive,
       });
       continue;
     }
@@ -356,6 +364,8 @@ function aggregateResults(
       title: member.title,
       passed: false,
       reason_short: truncateReason(rows[0]!.reason_short),
+      archetype_id: member.archetype_id,
+      scorer_primitive: member.scorer_primitive,
     });
   }
   return out;

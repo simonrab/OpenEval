@@ -82,8 +82,9 @@ export function executeRegisterFailure(
 
   db.prepare(
     `INSERT INTO evals
-      (id, title, score_how, status, program_check, input_truncated, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      (id, title, score_how, status, program_check, input_truncated,
+       archetype_id, scorer_primitive, evidence_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     evalId,
     title,
@@ -91,6 +92,9 @@ export function executeRegisterFailure(
     status,
     input.program_check ? JSON.stringify(input.program_check) : null,
     failureInputTruncated(input.input, input.output),
+    input.archetype_id ?? null,
+    input.program_check?.kind ?? null,
+    input.evidence ? JSON.stringify(input.evidence) : null,
     createdAt,
   );
   db.prepare(

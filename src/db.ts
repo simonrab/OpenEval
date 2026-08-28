@@ -41,6 +41,11 @@ export function migrate(db: Database.Database): void {
   const sql = readFileSync(schemaPath, "utf8");
   db.exec(sql);
   addColumnIfMissing(db, "samples", "dropped_at", "TEXT");
+  addColumnIfMissing(db, "jobs", "registry_version", "TEXT");
+  addColumnIfMissing(db, "jobs", "archetype_plan", "TEXT");
+  addColumnIfMissing(db, "evals", "archetype_id", "TEXT");
+  addColumnIfMissing(db, "evals", "scorer_primitive", "TEXT");
+  addColumnIfMissing(db, "evals", "evidence_json", "TEXT");
   addColumnIfMissing(db, "project_live_state", "canary_policy_id", "TEXT");
   addColumnIfMissing(db, "project_live_state", "canary_percent", "INTEGER");
   addColumnIfMissing(

@@ -9,7 +9,16 @@ export type ProgramCheck = {
     | "tool_name"
     | "field_equals"
     | "must_not_contain"
-    | "fixture";
+    | "fixture"
+    | "json_schema"
+    | "regex_match"
+    | "numeric_close"
+    | "set_equals"
+    | "tool_args"
+    | "trace_rule"
+    | "citation_support"
+    | "retrieval_contains"
+    | "pairwise_equals";
   expected: unknown;
 };
 
@@ -28,6 +37,9 @@ export type DraftEval = {
   input_truncated: string;
   form_type?: DraftFormType;
   form_spec?: Record<string, unknown>;
+  archetype_id?: string | null;
+  scorer_primitive?: string | null;
+  evidence_json?: Record<string, unknown> | null;
 };
 
 export type StoredEval = {
@@ -35,6 +47,8 @@ export type StoredEval = {
   title: string;
   score_how: "code" | "person";
   status: string;
+  archetype_id: string | null;
+  scorer_primitive: string | null;
 };
 
 export type ExampleLabel = {
@@ -46,6 +60,7 @@ export type MemberEval = StoredEval & {
   program_check: ProgramCheck | null;
   input_truncated: string;
   form_spec: ExampleLabel | null;
+  evidence_json: Record<string, unknown> | null;
 };
 
 export function truncateInput(text: string, max = INPUT_TRUNCATE): string {
@@ -116,8 +131,9 @@ export function createEvalSetVersion1(
   const insertEval = db.prepare(
     `INSERT INTO evals
       (id, title, score_how, status, program_check, input_truncated,
-       form_type, form_spec, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       form_type, form_spec, archetype_id, scorer_primitive, evidence_json,
+       created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertMember = db.prepare(
     `INSERT INTO eval_set_members (eval_set_id, eval_id) VALUES (?, ?)`,
@@ -134,6 +150,9 @@ export function createEvalSetVersion1(
       draft.input_truncated,
       draft.form_type ?? null,
       draft.form_spec ? JSON.stringify(draft.form_spec) : null,
+      draft.archetype_id ?? null,
+      draft.scorer_primitive ?? draft.program_check?.kind ?? null,
+      draft.evidence_json ? JSON.stringify(draft.evidence_json) : null,
       createdAt,
     );
     insertMember.run(evalSetId, evalId);
@@ -142,6 +161,8 @@ export function createEvalSetVersion1(
       title: draft.title,
       score_how: draft.score_how,
       status: draft.status,
+      archetype_id: draft.archetype_id ?? null,
+      scorer_primitive: draft.scorer_primitive ?? draft.program_check?.kind ?? null,
     });
   }
 
@@ -158,8 +179,9 @@ export function insertDraftEvals(
   const insertEval = db.prepare(
     `INSERT INTO evals
       (id, title, score_how, status, program_check, input_truncated,
-       form_type, form_spec, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       form_type, form_spec, archetype_id, scorer_primitive, evidence_json,
+       created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertMember = db.prepare(
     `INSERT INTO eval_set_members (eval_set_id, eval_id) VALUES (?, ?)`,
@@ -176,6 +198,9 @@ export function insertDraftEvals(
       draft.input_truncated,
       draft.form_type ?? null,
       draft.form_spec ? JSON.stringify(draft.form_spec) : null,
+      draft.archetype_id ?? null,
+      draft.scorer_primitive ?? draft.program_check?.kind ?? null,
+      draft.evidence_json ? JSON.stringify(draft.evidence_json) : null,
       createdAt,
     );
     insertMember.run(evalSetId, evalId);
@@ -184,6 +209,8 @@ export function insertDraftEvals(
       title: draft.title,
       score_how: draft.score_how,
       status: draft.status,
+      archetype_id: draft.archetype_id ?? null,
+      scorer_primitive: draft.scorer_primitive ?? draft.program_check?.kind ?? null,
     });
   }
 
@@ -234,7 +261,8 @@ export function listMembers(
   const rows = db
     .prepare(
       `SELECT e.id AS eval_id, e.title, e.score_how, e.status, e.program_check,
-              e.input_truncated, e.form_spec
+              e.input_truncated, e.form_spec, e.archetype_id,
+              e.scorer_primitive, e.evidence_json
        FROM eval_set_members m
        JOIN evals e ON e.id = m.eval_id
        WHERE m.eval_set_id = ?
@@ -248,6 +276,9 @@ export function listMembers(
     program_check: string | null;
     input_truncated: string;
     form_spec: string | null;
+    archetype_id: string | null;
+    scorer_primitive: string | null;
+    evidence_json: string | null;
   }>;
   return rows.map((row) => ({
     eval_id: row.eval_id,
@@ -259,7 +290,25 @@ export function listMembers(
       : null,
     input_truncated: row.input_truncated,
     form_spec: parseExampleLabel(row.form_spec),
+    archetype_id: row.archetype_id,
+    scorer_primitive: row.scorer_primitive,
+    evidence_json: parseEvidenceJson(row.evidence_json),
   }));
+}
+
+function parseEvidenceJson(raw: string | null): Record<string, unknown> | null {
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function parseExampleLabel(raw: string | null): ExampleLabel | null {

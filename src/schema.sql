@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   project_id TEXT NOT NULL,
   description TEXT NOT NULL,
   limits TEXT,
+  registry_version TEXT,
+  archetype_plan TEXT,
   created_at TEXT NOT NULL,
   FOREIGN KEY (project_id) REFERENCES projects(id)
 );
@@ -53,6 +55,9 @@ CREATE TABLE IF NOT EXISTS evals (
   input_truncated TEXT,
   form_type TEXT,
   form_spec TEXT,
+  archetype_id TEXT,
+  scorer_primitive TEXT,
+  evidence_json TEXT,
   draft_mark TEXT,
   trusted_mark TEXT,
   created_at TEXT NOT NULL

@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  BUILTIN_ARCHETYPE_IDS,
+  isCustomArchetypeId,
+} from "../archetypes/registry.js";
 import { agentError } from "../errors.js";
 import {
   ErrorCode,
@@ -48,6 +52,89 @@ const labeledExampleSchema = z
   })
   .strict();
 
+const promptEvidenceSchema = z
+  .object({
+    name: z.string().optional(),
+    text: z.string().min(1),
+  })
+  .strict();
+
+const schemaEvidenceSchema = z
+  .object({
+    name: z.string().optional(),
+    schema: z.record(z.unknown()).optional(),
+    fields: z.array(z.string().min(1)).optional(),
+  })
+  .strict()
+  .superRefine((val, ctx) => {
+    const hasSchema = val.schema != null && Object.keys(val.schema).length > 0;
+    const hasFields = (val.fields?.length ?? 0) > 0;
+    if (!hasSchema && !hasFields) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "schema or fields is required",
+      });
+    }
+  });
+
+const toolSchemaEvidenceSchema = z
+  .object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    schema: z.record(z.unknown()).optional(),
+  })
+  .strict();
+
+const sourceDocEvidenceSchema = z
+  .object({
+    id: z.string().min(1),
+    text: z.string().min(1),
+  })
+  .strict();
+
+const traceSummaryEvidenceSchema = z
+  .object({
+    id: z.string().optional(),
+    text: z.string().min(1),
+    steps: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+const evidenceSchema = z
+  .object({
+    prompts: z.array(promptEvidenceSchema).optional(),
+    schemas: z.array(schemaEvidenceSchema).optional(),
+    tool_schemas: z.array(toolSchemaEvidenceSchema).optional(),
+    source_docs: z.array(sourceDocEvidenceSchema).optional(),
+    trace_summaries: z.array(traceSummaryEvidenceSchema).optional(),
+    user_notes: z.array(z.string().min(1)).optional(),
+    labels: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+const archetypeIdSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (id) =>
+      (BUILTIN_ARCHETYPE_IDS as readonly string[]).includes(id) ||
+      isCustomArchetypeId(id),
+    "archetype id must be built-in or start with custom:",
+  );
+
+const customArchetypeSchema = z
+  .object({
+    id: z.string().min(1).refine(isCustomArchetypeId, "id must start with custom:"),
+    name: z.string().min(1),
+    measures: z.string().min(1),
+    applies_when: z.string().min(1),
+    required_evidence: z.array(z.string().min(1)),
+    scorer_primitives: z.array(z.string().min(1)),
+    human_mark_path: z.string().min(1),
+    examples: z.array(z.string().min(1)),
+  })
+  .strict();
+
 const limitsSchema = z
   .object({
     needs_images: z.boolean().optional(),
@@ -75,6 +162,9 @@ export const generateEvalSuiteInputSchema = z
     description: z.string().optional(),
     sample_files: z.array(sampleFileSchema).optional(),
     labeled_examples: z.array(labeledExampleSchema).optional(),
+    archetype_ids: z.array(archetypeIdSchema).optional(),
+    custom_archetypes: z.array(customArchetypeSchema).optional(),
+    evidence: evidenceSchema.optional(),
     system_prompt: z.string().min(1).optional(),
     limits: limitsSchema.optional(),
     what_good_means: whatGoodMeansSchema.nullable().optional(),
@@ -88,11 +178,13 @@ export const generateEvalSuiteInputSchema = z
       typeof val.description === "string" && val.description.length > 0;
     const hasGood = val.what_good_means != null;
     const hasLabeled = (val.labeled_examples?.length ?? 0) > 0;
+    const hasArchetypes = (val.archetype_ids?.length ?? 0) > 0;
     const retiring = (val.retire_eval_ids?.length ?? 0) > 0;
-    if (!hasDescription && !hasGood && !hasLabeled && !retiring) {
+    if (!hasDescription && !hasGood && !hasLabeled && !hasArchetypes && !retiring) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "description, what_good_means, or labeled_examples is required",
+        message:
+          "description, what_good_means, labeled_examples, or archetype_ids is required",
       });
     }
     if (
@@ -203,6 +295,15 @@ export const programCheckSchema = z
       "field_equals",
       "must_not_contain",
       "fixture",
+      "json_schema",
+      "regex_match",
+      "numeric_close",
+      "set_equals",
+      "tool_args",
+      "trace_rule",
+      "citation_support",
+      "retrieval_contains",
+      "pairwise_equals",
     ]),
     expected: z.unknown(),
   })
@@ -226,6 +327,8 @@ export const registerFailureInputSchema = z
     why_bad: z.string().optional(),
     trace: z.string().optional(),
     program_check: programCheckSchema.optional(),
+    archetype_id: archetypeIdSchema.optional(),
+    evidence: evidenceSchema.optional(),
     current_named_model: z.string().nullable().optional(),
     idempotency_key: z.string().min(1),
   })
@@ -347,6 +450,8 @@ const evalPreviewSchema = z
     title: z.string(),
     score_how: z.enum(["code", "person"]),
     status: z.string(),
+    archetype_id: z.string().nullable(),
+    scorer_primitive: z.string().nullable(),
   })
   .strict();
 
@@ -360,6 +465,8 @@ export const generateEvalSuiteOutputSchema = z
     n_code: z.number().int(),
     n_person: z.number().int(),
     n_draft: z.number().int(),
+    registry_version: z.string(),
+    archetype_ids_used: z.array(z.string()),
     counts: z
       .object({
         draft: z.number().int(),
@@ -507,6 +614,8 @@ export const getEvalReportOutputSchema = z
           title: z.string(),
           passed: z.boolean(),
           reason_short: z.string(),
+          archetype_id: z.string().nullable(),
+          scorer_primitive: z.string().nullable(),
         })
         .strict(),
     ),

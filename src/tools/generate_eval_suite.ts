@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { invalidInputError, jobUnclearError, projectNotFoundError, suiteNotFoundError } from "../errors.js";
+import { buildDraftPlan, type DraftPlan } from "../archetypes/drafts.js";
 import { copyEvalSetForward } from "../eval-set-copy.js";
 import {
   createEvalSetVersion1,
@@ -13,16 +14,6 @@ import {
 } from "../eval-set.js";
 import { attachImagePdfFiles } from "../eval-files.js";
 import { newJobId, newProjectId } from "../ids.js";
-import { extractDrafts, isExtractJob } from "../job-types/extract.js";
-import { imagePdfDrafts, isImagePdfJob } from "../job-types/image_pdf.js";
-import { isJsonObjectJob, jsonObjectDrafts } from "../job-types/json_object.js";
-import { isToneJob, toneDrafts } from "../job-types/tone.js";
-import { labeledExampleDrafts } from "../job-types/labeled.js";
-import {
-  draftsFromWhatGoodMeans,
-  hasPersonSignals,
-  personDraftFromText,
-} from "../job-types/unknown.js";
 import { projectExists } from "../keys.js";
 import { buildAcceptUrl, signAcceptToken } from "../routes/accept.js";
 import {
@@ -65,85 +56,6 @@ function ensureProject(
   return { ok: true, projectId };
 }
 
-function personSignalText(input: GenerateInput): string {
-  return [
-    input.description,
-    input.what_good_means?.how_it_should_behave,
-    input.what_good_means?.success,
-  ]
-    .filter((part): part is string => typeof part === "string" && part.length > 0)
-    .join(" ");
-}
-
-function mergePersonDrafts(
-  drafts: DraftEval[],
-  input: GenerateInput,
-): DraftEval[] {
-  if (!hasPersonSignals(personSignalText(input))) {
-    return drafts;
-  }
-  if (input.what_good_means != null) {
-    const fromWgm = draftsFromWhatGoodMeans(input.what_good_means).filter(
-      (d) => d.score_how === "person",
-    );
-    drafts.push(...fromWgm);
-  }
-  if (!drafts.some((d) => d.score_how === "person")) {
-    drafts.push(personDraftFromText(input.description ?? personSignalText(input)));
-  }
-  return drafts;
-}
-
-function buildDrafts(input: GenerateInput): DraftEval[] | null {
-  if (input.labeled_examples && input.labeled_examples.length > 0) {
-    return labeledExampleDrafts(input.labeled_examples);
-  }
-  const description = input.description;
-  const sampleFiles = input.sample_files;
-  const extras = {
-    needs_images: input.limits?.needs_images,
-    sampleFiles,
-  };
-  const drafts: DraftEval[] = [];
-  if (isJsonObjectJob(description)) {
-    drafts.push(
-      ...jsonObjectDrafts({
-        description: description ?? "",
-        sampleFiles,
-      }),
-    );
-  }
-  if (isExtractJob(description)) {
-    drafts.push(...extractDrafts({ description: description ?? "" }));
-  }
-  if (isImagePdfJob(description, extras)) {
-    drafts.push(...imagePdfDrafts({ description: description ?? "" }));
-  }
-  const toneText = description ?? personSignalText(input);
-  if (isToneJob(description) || isToneJob(toneText)) {
-    drafts.push(...toneDrafts({ description: toneText }));
-  }
-  if (drafts.length > 0) {
-    return mergePersonDrafts(drafts, input);
-  }
-  if (input.what_good_means != null) {
-    const wgm = draftsFromWhatGoodMeans(input.what_good_means);
-    if (sampleFiles && sampleFiles.length > 0) {
-      for (const file of sampleFiles) {
-        wgm.push({
-          title: `Sample ${file.path}`,
-          score_how: "code",
-          status: "draft",
-          program_check: { kind: "fixture", expected: { path: file.path } },
-          input_truncated: file.content.slice(0, 500),
-        });
-      }
-    }
-    return wgm;
-  }
-  return null;
-}
-
 function nextActionForAcceptUrl(
   acceptUrl: string,
   afterAccept: { tool: string; args: Record<string, unknown> },
@@ -157,6 +69,56 @@ function nextActionForAcceptUrl(
     },
     ask_human: "open accept_url",
   };
+}
+
+function planDrafts(input: GenerateInput): DraftPlan {
+  const plan = buildDraftPlan(input);
+  if (!plan.ok) {
+    return plan;
+  }
+  return {
+    ...plan,
+    drafts: capDrafts(plan.drafts, input.size),
+  };
+}
+
+function previewEvals(
+  members: Array<{
+    eval_id: string;
+    title: string;
+    score_how: "code" | "person";
+    status: string;
+    archetype_id: string | null;
+    scorer_primitive: string | null;
+  }>,
+): Array<{
+  eval_id: string;
+  title: string;
+  score_how: "code" | "person";
+  status: string;
+  archetype_id: string | null;
+  scorer_primitive: string | null;
+}> {
+  return members.slice(0, 5).map((e) => ({
+    eval_id: e.eval_id,
+    title: e.title,
+    score_how: e.score_how,
+    status: e.status,
+    archetype_id: e.archetype_id,
+    scorer_primitive: e.scorer_primitive,
+  }));
+}
+
+function mergeArchetypeIds(
+  planned: string[],
+  members: Array<{ archetype_id: string | null }>,
+): string[] {
+  return [
+    ...new Set([
+      ...planned,
+      ...members.map((e) => e.archetype_id).filter((id): id is string => id != null),
+    ]),
+  ];
 }
 
 export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
@@ -197,11 +159,14 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
       return { status: 404, body: projectNotFoundError(projectId) };
     }
 
-    const draftsRaw = buildDrafts(input);
-    if ((draftsRaw == null || draftsRaw.length === 0) && !retiring) {
+    const draftPlan = planDrafts(input);
+    if (!draftPlan.ok) {
+      return { status: 400, body: invalidInputError(draftPlan.message) };
+    }
+    if (draftPlan.drafts.length === 0 && !retiring) {
       return { status: 400, body: jobUnclearError() };
     }
-    const drafts = capDrafts(draftsRaw ?? [], input.size);
+    const drafts = draftPlan.drafts;
 
     const sourceIds = new Set(
       listMembers(db, sourceEvalSetId).map((m) => m.eval_id),
@@ -243,12 +208,7 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
       const nPerson = members.filter((e) => e.score_how === "person").length;
       const nDraft = members.filter((e) => e.status === "draft").length;
       const nTrusted = members.filter((e) => e.status === "trusted").length;
-      const preview = members.slice(0, 5).map((e) => ({
-        eval_id: e.eval_id,
-        title: e.title,
-        score_how: e.score_how,
-        status: e.status,
-      }));
+      const preview = previewEvals(members);
       const afterAccept = nextActionForSet(members, projectId, copied.newEvalSetId);
       const acceptUrl = buildAcceptUrl(
         ctx.baseUrl ?? "http://127.0.0.1:3000",
@@ -265,6 +225,8 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
         n_code: nCode,
         n_person: nPerson,
         n_draft: nDraft,
+        registry_version: draftPlan.registryVersion,
+        archetype_ids_used: mergeArchetypeIds(draftPlan.archetypeIdsUsed, members),
         counts: {
           draft: nDraft,
           code: nCode,
@@ -291,11 +253,14 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
     return run();
   }
 
-  const draftsRaw = buildDrafts(input);
-  if (draftsRaw == null || draftsRaw.length === 0) {
+  const draftPlan = planDrafts(input);
+  if (!draftPlan.ok) {
+    return { status: 400, body: invalidInputError(draftPlan.message) };
+  }
+  if (draftPlan.drafts.length === 0) {
     return { status: 400, body: jobUnclearError() };
   }
-  const drafts = capDrafts(draftsRaw, input.size);
+  const drafts = draftPlan.drafts;
 
   const run = db.transaction(() => {
     const project = ensureProject(db, input.project_id);
@@ -314,13 +279,17 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
     const limitsJson =
       Object.keys(limits).length > 0 ? JSON.stringify(limits) : null;
     db.prepare(
-      `INSERT INTO jobs (id, project_id, description, limits, created_at)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO jobs
+        (id, project_id, description, limits, registry_version,
+         archetype_plan, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       jobId,
       projectId,
       description ?? "",
       limitsJson,
+      draftPlan.registryVersion,
+      JSON.stringify(draftPlan.archetypePlan),
       new Date().toISOString(),
     );
 
@@ -338,18 +307,14 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
     const nCode = createdSet.evals.filter((e) => e.score_how === "code").length;
     const nPerson = createdSet.evals.filter((e) => e.score_how === "person").length;
     const nDraft = createdSet.evals.filter((e) => e.status === "draft").length;
-    const preview = createdSet.evals.slice(0, 5).map((e) => ({
-      eval_id: e.eval_id,
-      title: e.title,
-      score_how: e.score_how,
-      status: e.status,
-    }));
+    const preview = previewEvals(createdSet.evals);
     const next = nextActionForSet(
       createdSet.evals.map((e) => ({
         ...e,
         program_check: null,
         input_truncated: "",
         form_spec: null,
+        evidence_json: null,
       })),
       projectId,
       createdSet.evalSetId,
@@ -369,6 +334,11 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
       n_code: nCode,
       n_person: nPerson,
       n_draft: nDraft,
+      registry_version: draftPlan.registryVersion,
+      archetype_ids_used: mergeArchetypeIds(
+        draftPlan.archetypeIdsUsed,
+        createdSet.evals,
+      ),
       counts: {
         draft: nDraft,
         code: nCode,
