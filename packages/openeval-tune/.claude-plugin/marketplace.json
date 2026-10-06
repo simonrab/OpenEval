@@ -1,0 +1,16 @@
+{
+  "name": "openeval-tune",
+  "owner": {
+    "name": "OpenEval"
+  },
+  "metadata": {
+    "description": "The openeval-tune plugin for Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "openeval-tune",
+      "source": "./",
+      "description": "Improve an AI feature one change per round with OpenEval as the referee."
+    }
+  ]
+}

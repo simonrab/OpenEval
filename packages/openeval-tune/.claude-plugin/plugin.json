@@ -1,0 +1,12 @@
+{
+  "name": "openeval-tune",
+  "version": "0.1.0",
+  "description": "Improve an AI feature one change per round: system prompt, tool descriptions, harness code, and model settings. OpenEval is the independent referee.",
+  "author": {
+    "name": "OpenEval"
+  },
+  "homepage": "https://github.com/simonrab/OpenEval/tree/main/packages/openeval-tune",
+  "repository": "https://github.com/simonrab/OpenEval",
+  "license": "Apache-2.0",
+  "keywords": ["evals", "prompt-optimization", "hillclimb", "openeval"]
+}

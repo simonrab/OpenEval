@@ -1,16 +1,47 @@
 {
-  "name": "evalrouter",
+  "name": "openeval",
   "version": "0.0.0",
-  "private": true,
+  "description": "Agent tool and HTTP API for evidence-based model choice.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/simonrab/OpenEval.git"
+  },
+  "bugs": {
+    "url": "https://github.com/simonrab/OpenEval/issues"
+  },
+  "homepage": "https://github.com/simonrab/OpenEval#readme",
+  "keywords": [
+    "evals",
+    "ai",
+    "mcp",
+    "model-selection",
+    "openrouter"
+  ],
+  "private": false,
   "type": "module",
+  "packageManager": "npm@11.9.0",
+  "files": [
+    "src/",
+    "examples/",
+    ".env.example",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "tsconfig.json"
+  ],
   "engines": {
     "node": ">=22"
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "test": "node --import ./test/load-env.ts --import tsx --test test/*.test.ts test/scoring/*.test.ts test/job-types/*.test.ts",
     "start": "node --env-file-if-exists=.env --import tsx src/server.ts",
     "mcp": "node --env-file-if-exists=.env --import tsx src/mcp/stdio.ts",
-    "build": "tsc && cp src/schema.sql dist/schema.sql && cp src/accept.html dist/accept.html && cp src/approve.html dist/approve.html && cp src/compile-approve.html dist/compile-approve.html && cp src/rollout-approve.html dist/rollout-approve.html && cp src/sample.html dist/sample.html && cp src/live-report.html dist/live-report.html && cp src/report.html dist/report.html && cp src/mark/screen.html dist/mark/screen.html && cp src/mark/third.html dist/mark/third.html"
+    "build": "tsc && cp src/schema.sql dist/schema.sql && cp src/accept.html dist/accept.html && cp src/approve.html dist/approve.html && cp src/compile-approve.html dist/compile-approve.html && cp src/rollout-approve.html dist/rollout-approve.html && cp src/sample.html dist/sample.html && cp src/live-report.html dist/live-report.html && cp src/report.html dist/report.html && cp src/mark/screen.html dist/mark/screen.html && cp src/mark/third.html dist/mark/third.html",
+    "test:tune": "npm test --workspace openeval-tune"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

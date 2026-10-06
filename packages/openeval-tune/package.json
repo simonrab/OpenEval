@@ -1,0 +1,45 @@
+{
+  "name": "openeval-tune",
+  "version": "0.1.0",
+  "description": "Improve an AI feature one change per round. OpenEval is the referee.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/simonrab/OpenEval.git",
+    "directory": "packages/openeval-tune"
+  },
+  "keywords": [
+    "evals",
+    "ai",
+    "prompt-optimization",
+    "hillclimb",
+    "openeval",
+    "claude-code-plugin"
+  ],
+  "bin": {
+    "openeval-tune": "bin/openeval-tune.mjs"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "skills/",
+    ".claude-plugin/",
+    "README.md",
+    "tsconfig.json"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "tsx": "^4.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.0"
+  }
+}
