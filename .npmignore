@@ -1,0 +1,15 @@
+.cursor/
+.env
+.DS_Store
+AGENTS.md
+BUILD.md
+RUNTIME_BUILD.md
+V2_BUILD.md
+build/
+data/
+dist/
+node_modules/
+coverage/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
