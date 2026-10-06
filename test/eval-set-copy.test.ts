@@ -18,8 +18,8 @@ describe("eval-set-copy", () => {
   let evalIds: string[];
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-copy-"));
-    db = openDb(join(dir, "evalrouter.sqlite"));
+    dir = mkdtempSync(join(tmpdir(), "openeval-copy-"));
+    db = openDb(join(dir, "openeval.sqlite"));
     projectId = "prj_copy_test";
     db.prepare("INSERT INTO projects (id, created_at) VALUES (?, ?)").run(
       projectId,

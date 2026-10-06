@@ -30,8 +30,8 @@ describe("recommend_models (J4)", () => {
   let keysRef: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-recommend-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-recommend-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await createTestApp(sqlitePath);
 
     const proj = await app.inject({

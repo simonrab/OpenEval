@@ -26,8 +26,8 @@ describe("approve screen (J4)", () => {
   let customerEnvBefore: string | null;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-approve-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-approve-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     customerEnvPath = join(dir, "customer.env");
     writeFileSync(customerEnvPath, "MODEL=old/provider-model\n");
     customerEnvBefore = readFileSync(customerEnvPath, "utf8");

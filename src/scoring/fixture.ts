@@ -6,7 +6,7 @@ import { resolve, sep } from "node:path";
  * Fixture checks run a customer script from their repo.
  * Interface: model output is written to the script's stdin; exit 0 = pass.
  * Set expected.path (relative to root) and optional expected.root or
- * EVALROUTER_FIXTURE_ROOT. Non-zero exit or timeout fails closed.
+ * OPENEVAL_FIXTURE_ROOT. Non-zero exit or timeout fails closed.
  * Stdout/stderr are never included in reason_short (may contain secrets).
  */
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -21,7 +21,7 @@ function fixtureRoot(spec: FixtureExpected): string {
   if (typeof spec.root === "string" && spec.root.length > 0) {
     return resolve(spec.root);
   }
-  const envRoot = process.env.EVALROUTER_FIXTURE_ROOT;
+  const envRoot = process.env.OPENEVAL_FIXTURE_ROOT;
   if (envRoot) {
     return resolve(envRoot);
   }

@@ -26,8 +26,8 @@ describe("run_evals (J2/J4)", () => {
   let keysRef: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-run-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-run-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await createTestApp(sqlitePath);
 
     const proj = await app.inject({
@@ -74,6 +74,12 @@ describe("run_evals (J2/J4)", () => {
       (body as { next_action: { tool: string } }).next_action.tool,
       "get_eval_report",
     );
+    const db = new Database(sqlitePath, { readonly: true });
+    const run = db
+      .prepare("SELECT reps FROM runs WHERE id = ?")
+      .get((body as { run_id: string }).run_id) as { reps: number };
+    db.close();
+    assert.equal(run.reps, 3, "reps defaults to 3");
   });
 
   it("scores trusted code evals with programs, not mark queue", async () => {
@@ -371,6 +377,7 @@ describe("run_evals (J2/J4)", () => {
         project_id: projectId,
         eval_set_id: evalSetId,
         models: ["openai/gpt-4o-mini"],
+        reps: 1,
         max_eval_spend_usd: 1,
         keys_ref: keysRef,
         idempotency_key: "run-http-failure-reason",

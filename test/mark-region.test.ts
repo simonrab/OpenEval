@@ -73,8 +73,8 @@ describe("mark region on image/PDF", () => {
   let personEvalId: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-mark-region-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-mark-region-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await createTestApp(sqlitePath);
     const proj = await app.inject({
       method: "POST",
@@ -218,8 +218,8 @@ describe("generate image-location job", () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-gen-region-"));
-    app = await createTestApp(join(dir, "evalrouter.sqlite"));
+    dir = mkdtempSync(join(tmpdir(), "openeval-gen-region-"));
+    app = await createTestApp(join(dir, "openeval.sqlite"));
   });
 
   afterEach(async () => {

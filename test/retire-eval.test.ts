@@ -44,8 +44,8 @@ describe("retire eval (J6)", () => {
   let oldEvalIds: string[];
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-retire-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-retire-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await createTestApp(sqlitePath);
 
     const proj = await app.inject({

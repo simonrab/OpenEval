@@ -80,8 +80,8 @@ describe("get_live_report (L7)", () => {
   let livePolicyId: string | null;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-live-report-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-live-report-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await buildApp({
       sqlitePath,
       apiKey,
@@ -362,7 +362,7 @@ describe("get_live_report (L7)", () => {
       assert.ok(tool, `missing MCP tool ${name}`);
       assert.equal(typeof tool.description, "string");
       assert.ok(tool.description.length > 0);
-      assert.doesNotMatch(tool.description, /^EvalRouter /);
+      assert.doesNotMatch(tool.description, /^OpenEval /);
       assert.equal(tool.inputSchema.type, "object");
       assert.equal(tool.inputSchema.additionalProperties, false);
     }

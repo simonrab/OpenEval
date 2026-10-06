@@ -82,8 +82,8 @@ describe("M7 error branches", () => {
   let namedModelId: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-error-branches-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-error-branches-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await createTestApp(sqlitePath);
     const proj = await app.inject({
       method: "POST",

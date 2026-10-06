@@ -26,7 +26,7 @@ function authHeaders(projectId: string): Record<string, string> {
   return {
     authorization: `Bearer ${apiKey}`,
     "content-type": "application/json",
-    "x-evalrouter-project-id": projectId,
+    "x-openeval-project-id": projectId,
     "x-openrouter-api-key": vendorKey,
   };
 }
@@ -64,8 +64,8 @@ describe("optional proxy runtime", () => {
   let proxyModel: string | null;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-proxy-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-proxy-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     proxyModel = null;
     app = await buildApp({
       sqlitePath,
@@ -136,8 +136,8 @@ describe("optional proxy runtime", () => {
     let sdkModel: string | null = null;
     const sdk = createLiveSdk({
       projectId,
-      evalrouterUrl: "http://test.local",
-      evalrouterKey: apiKey,
+      openevalUrl: "http://test.local",
+      openevalKey: apiKey,
       vendorKey,
       lastKnownPath: join(dir, "last-known.json"),
       pollMs: 30_000,

@@ -54,8 +54,8 @@ describe("register_failure (J5)", () => {
   let oldEvalIds: string[];
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-register-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-register-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await createTestApp(sqlitePath);
     const proj = await app.inject({
       method: "POST",

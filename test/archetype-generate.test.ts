@@ -22,8 +22,8 @@ describe("archetype generate", () => {
   let sqlitePath: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-archetype-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-archetype-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await createTestApp(sqlitePath);
   });
 
@@ -340,8 +340,8 @@ describe("archetype planner", () => {
 
 describe("archetype migration", () => {
   it("adds metadata columns to an existing SQLite file", () => {
-    const dir = mkdtempSync(join(tmpdir(), "evalrouter-migrate-archetype-"));
-    const sqlitePath = join(dir, "evalrouter.sqlite");
+    const dir = mkdtempSync(join(tmpdir(), "openeval-migrate-archetype-"));
+    const sqlitePath = join(dir, "openeval.sqlite");
     try {
       const legacy = new Database(sqlitePath);
       legacy.exec(`

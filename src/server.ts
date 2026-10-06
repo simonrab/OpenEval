@@ -42,11 +42,11 @@ export type AppOptions = {
 };
 
 export function deriveBaseUrl(env: {
-  EVALROUTER_BASE_URL?: string;
+  OPENEVAL_BASE_URL?: string;
   HOST?: string;
   PORT?: string;
 }): string {
-  const explicit = env.EVALROUTER_BASE_URL?.trim();
+  const explicit = env.OPENEVAL_BASE_URL?.trim();
   if (explicit) {
     return explicit.replace(/\/+$/, "");
   }
@@ -99,9 +99,9 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
 }
 
 async function main(): Promise<void> {
-  const apiKey = process.env.EVALROUTER_KEY;
+  const apiKey = process.env.OPENEVAL_KEY;
   if (!apiKey) {
-    console.error("EVALROUTER_KEY is required");
+    console.error("OPENEVAL_KEY is required");
     process.exit(1);
   }
 
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
   });
 
   await app.listen({ port, host });
-  app.log.info(`EvalRouter listening on ${host}:${port}`);
+  app.log.info(`OpenEval listening on ${host}:${port}`);
 }
 
 const isMain =

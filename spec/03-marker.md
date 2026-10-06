@@ -1,6 +1,6 @@
 # 03. Marker (second person)
 
-Slice of the EvalRouter product spec. This file is the contract for the second person who marks examples. It does not specify the agent API, the developer’s accept-evals job, or how a model is named.
+Slice of the OpenEval product spec. This file is the contract for the second person who marks examples. It does not specify the agent API, the developer’s accept-evals job, or how a model is named.
 
 ## User
 

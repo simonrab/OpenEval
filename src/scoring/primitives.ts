@@ -66,6 +66,32 @@ function validateSchema(
     return `${path || "value"} value mismatch`;
   }
 
+  const name = path || "value";
+  if (typeof value === "string") {
+    if (typeof schema.minLength === "number" && value.length < schema.minLength) {
+      return `${name} too short`;
+    }
+    if (typeof schema.maxLength === "number" && value.length > schema.maxLength) {
+      return `${name} too long`;
+    }
+  }
+  if (typeof value === "number") {
+    if (typeof schema.minimum === "number" && value < schema.minimum) {
+      return `${name} below minimum`;
+    }
+    if (typeof schema.maximum === "number" && value > schema.maximum) {
+      return `${name} above maximum`;
+    }
+  }
+  if (Array.isArray(value)) {
+    if (typeof schema.minItems === "number" && value.length < schema.minItems) {
+      return `${name} too few items`;
+    }
+    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
+      return `${name} too many items`;
+    }
+  }
+
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const obj = value as Record<string, unknown>;
     const required = schema.required;
@@ -133,25 +159,85 @@ export function scoreJsonSchema(output: string, expected: unknown): ScoreResult 
   return { passed: true, reason_short: "schema ok" };
 }
 
+/** Limits that keep a bad pattern from running for a long time. */
+export const REGEX_MAX_PATTERN_CHARS = 200;
+export const REGEX_MAX_INPUT_CHARS = 20_000;
+const REGEX_FLAGS = /^[imsu]*$/;
+// Nested quantifiers such as (a+)+ can backtrack for a very long time.
+const NESTED_QUANTIFIER = /\((?:[^()\\]|\\.)*[+*}](?:[^()\\]|\\.)*\)\s*[+*{]/;
+
+/** Returns why a regex_match pattern is unsafe, or null when it is safe. */
+export function unsafeRegexReason(pattern: string, flags?: string): string | null {
+  if (pattern.length === 0) {
+    return "empty pattern";
+  }
+  if (pattern.length > REGEX_MAX_PATTERN_CHARS) {
+    return "pattern too long";
+  }
+  if (flags != null && !REGEX_FLAGS.test(flags)) {
+    return "bad regex flags";
+  }
+  if (NESTED_QUANTIFIER.test(pattern)) {
+    return "nested quantifier";
+  }
+  if (/\\[1-9]/.test(pattern)) {
+    return "backreference";
+  }
+  try {
+    new RegExp(pattern, flags);
+  } catch {
+    return "bad regex";
+  }
+  return null;
+}
+
+function textAtPath(output: string, path: unknown): string | null {
+  if (typeof path !== "string" || path.length === 0) {
+    return output;
+  }
+  const parsed = parseJson(output);
+  if (parsed === null) {
+    return null;
+  }
+  const value = getAtPath(parsed, path);
+  if (value === undefined) {
+    return null;
+  }
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
 export function scoreRegexMatch(output: string, expected: unknown): ScoreResult {
   const spec =
     typeof expected === "string"
       ? { pattern: expected }
-      : (expected as { pattern?: unknown; flags?: unknown; negate?: unknown } | null);
+      : (expected as {
+          pattern?: unknown;
+          flags?: unknown;
+          negate?: unknown;
+          path?: unknown;
+        } | null);
   if (!spec || typeof spec.pattern !== "string" || spec.pattern.length === 0) {
     return { passed: false, reason_short: "bad regex_match spec" };
   }
-  try {
-    const re = new RegExp(
-      spec.pattern,
-      typeof spec.flags === "string" ? spec.flags : undefined,
-    );
-    const matched = re.test(output);
-    const passed = spec.negate === true ? !matched : matched;
-    return { passed, reason_short: passed ? "regex ok" : "regex mismatch" };
-  } catch {
-    return { passed: false, reason_short: "bad regex" };
+  const flags = typeof spec.flags === "string" ? spec.flags : undefined;
+  const unsafe = unsafeRegexReason(spec.pattern, flags);
+  if (unsafe) {
+    return { passed: false, reason_short: unsafe };
   }
+  const text = textAtPath(output, spec.path);
+  if (text === null) {
+    return { passed: false, reason_short: `${String(spec.path)} missing` };
+  }
+  if (text.length > REGEX_MAX_INPUT_CHARS) {
+    return { passed: false, reason_short: "output too long for regex" };
+  }
+  const matched = new RegExp(spec.pattern, flags).test(text);
+  const passed = spec.negate === true ? !matched : matched;
+  return { passed, reason_short: passed ? "regex ok" : "regex mismatch" };
+}
+
+function roundDelta(delta: number): string {
+  return Number(delta.toPrecision(4)).toString();
 }
 
 export function scoreNumericClose(output: string, expected: unknown): ScoreResult {
@@ -159,25 +245,48 @@ export function scoreNumericClose(output: string, expected: unknown): ScoreResul
     path?: unknown;
     value?: unknown;
     tolerance?: unknown;
+    abs_tol?: unknown;
+    rel_tol?: unknown;
   } | null;
-  if (!spec || typeof spec.value !== "number") {
+  if (!spec || typeof spec.value !== "number" || !Number.isFinite(spec.value)) {
     return { passed: false, reason_short: "bad numeric_close spec" };
   }
   const parsed = parseJson(output);
   const raw =
-    typeof spec.path === "string" && parsed !== null
-      ? getAtPath(parsed, spec.path)
-      : parsed ?? output.match(/-?\d+(?:\.\d+)?/)?.[0];
-  const actual = typeof raw === "number" ? raw : Number(raw);
+    typeof spec.path === "string" && spec.path.length > 0
+      ? parsed !== null
+        ? getAtPath(parsed, spec.path)
+        : undefined
+      : typeof parsed === "number"
+        ? parsed
+        : output.match(/-?\d+(?:\.\d+)?/)?.[0];
+  const actual =
+    typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.trim()) : Number.NaN;
   if (!Number.isFinite(actual)) {
     return { passed: false, reason_short: "numeric value missing" };
   }
-  const tolerance = typeof spec.tolerance === "number" ? spec.tolerance : 0;
+  const absTol =
+    typeof spec.abs_tol === "number"
+      ? spec.abs_tol
+      : typeof spec.tolerance === "number"
+        ? spec.tolerance
+        : 0;
+  const relTol = typeof spec.rel_tol === "number" ? spec.rel_tol : 0;
+  const allowed = Math.max(absTol, relTol * Math.abs(spec.value));
   const delta = Math.abs(actual - spec.value);
+  // A small epsilon absorbs float noise such as 0.1 + 0.2.
+  const passed = delta <= allowed + 1e-12;
   return {
-    passed: delta <= tolerance,
-    reason_short: delta <= tolerance ? "numeric ok" : `delta ${delta}`,
+    passed,
+    reason_short: passed ? "numeric ok" : `delta ${roundDelta(delta)}`,
   };
+}
+
+function setKey(value: unknown, caseInsensitive: boolean): string {
+  if (caseInsensitive && typeof value === "string") {
+    return JSON.stringify(value.trim().toLowerCase());
+  }
+  return JSON.stringify(value);
 }
 
 export function scoreSetEquals(output: string, expected: unknown): ScoreResult {
@@ -185,6 +294,8 @@ export function scoreSetEquals(output: string, expected: unknown): ScoreResult {
     path?: unknown;
     values?: unknown;
     order_matters?: unknown;
+    ignore_order?: unknown;
+    case_insensitive?: unknown;
   } | null;
   if (!spec || !Array.isArray(spec.values)) {
     return { passed: false, reason_short: "bad set_equals spec" };
@@ -195,20 +306,104 @@ export function scoreSetEquals(output: string, expected: unknown): ScoreResult {
   if (!Array.isArray(actual)) {
     return { passed: false, reason_short: "array missing" };
   }
-  const actualJson = actual.map((v) => JSON.stringify(v));
-  const expectedJson = spec.values.map((v) => JSON.stringify(v));
-  if (spec.order_matters === true) {
-    return {
-      passed: sameJson(actualJson, expectedJson),
-      reason_short: sameJson(actualJson, expectedJson) ? "set ok" : "set mismatch",
-    };
+  const ci = spec.case_insensitive === true;
+  const actualKeys = actual.map((v) => setKey(v, ci));
+  const expectedKeys = spec.values.map((v) => setKey(v, ci));
+  const ordered = spec.order_matters === true || spec.ignore_order === false;
+  if (!ordered) {
+    actualKeys.sort();
+    expectedKeys.sort();
   }
-  actualJson.sort();
-  expectedJson.sort();
-  return {
-    passed: sameJson(actualJson, expectedJson),
-    reason_short: sameJson(actualJson, expectedJson) ? "set ok" : "set mismatch",
-  };
+  const ok = sameJson(actualKeys, expectedKeys);
+  if (ok) {
+    return { passed: true, reason_short: "set ok" };
+  }
+  const want = new Set(expectedKeys);
+  const have = new Set(actualKeys);
+  const missing = expectedKeys.filter((k) => !have.has(k)).length;
+  const extra = actualKeys.filter((k) => !want.has(k)).length;
+  if (missing === 0 && extra === 0) {
+    return { passed: false, reason_short: ordered ? "set order mismatch" : "set count mismatch" };
+  }
+  return { passed: false, reason_short: `set mismatch: ${missing} missing, ${extra} extra` };
+}
+
+function stringValues(spec: { values?: unknown } | null): string[] | null {
+  if (!spec || !Array.isArray(spec.values) || spec.values.length === 0) {
+    return null;
+  }
+  if (!spec.values.every((v) => typeof v === "string" && v.length > 0)) {
+    return null;
+  }
+  return spec.values as string[];
+}
+
+export function scoreContainsAll(output: string, expected: unknown): ScoreResult {
+  const spec = expected as { values?: unknown; case_insensitive?: unknown } | null;
+  const values = stringValues(spec);
+  if (!values) {
+    return { passed: false, reason_short: "bad contains_all spec" };
+  }
+  const ci = spec!.case_insensitive === true;
+  const text = ci ? output.toLowerCase() : output;
+  const missing = values.filter((v) => !text.includes(ci ? v.toLowerCase() : v));
+  if (missing.length === 0) {
+    return { passed: true, reason_short: `all ${values.length} present` };
+  }
+  return { passed: false, reason_short: `${missing.length} of ${values.length} missing` };
+}
+
+export function scoreContainsAny(output: string, expected: unknown): ScoreResult {
+  const spec = expected as { values?: unknown; case_insensitive?: unknown } | null;
+  const values = stringValues(spec);
+  if (!values) {
+    return { passed: false, reason_short: "bad contains_any spec" };
+  }
+  const ci = spec!.case_insensitive === true;
+  const text = ci ? output.toLowerCase() : output;
+  const hit = values.some((v) => text.includes(ci ? v.toLowerCase() : v));
+  return hit
+    ? { passed: true, reason_short: "one value present" }
+    : { passed: false, reason_short: `none of ${values.length} present` };
+}
+
+function countWords(text: string): number {
+  const trimmed = text.trim();
+  return trimmed.length === 0 ? 0 : trimmed.split(/\s+/).length;
+}
+
+export function scoreLengthRange(output: string, expected: unknown): ScoreResult {
+  const spec = expected as {
+    min_chars?: unknown;
+    max_chars?: unknown;
+    min_words?: unknown;
+    max_words?: unknown;
+  } | null;
+  const limits = spec
+    ? [spec.min_chars, spec.max_chars, spec.min_words, spec.max_words]
+    : [];
+  if (
+    !spec ||
+    limits.every((v) => v === undefined) ||
+    limits.some((v) => v !== undefined && (typeof v !== "number" || v < 0))
+  ) {
+    return { passed: false, reason_short: "bad length_range spec" };
+  }
+  const chars = output.trim().length;
+  const words = countWords(output);
+  if (typeof spec.min_chars === "number" && chars < spec.min_chars) {
+    return { passed: false, reason_short: `${chars} chars, min ${spec.min_chars}` };
+  }
+  if (typeof spec.max_chars === "number" && chars > spec.max_chars) {
+    return { passed: false, reason_short: `${chars} chars, max ${spec.max_chars}` };
+  }
+  if (typeof spec.min_words === "number" && words < spec.min_words) {
+    return { passed: false, reason_short: `${words} words, min ${spec.min_words}` };
+  }
+  if (typeof spec.max_words === "number" && words > spec.max_words) {
+    return { passed: false, reason_short: `${words} words, max ${spec.max_words}` };
+  }
+  return { passed: true, reason_short: "length ok" };
 }
 
 function toolPayload(output: string): { name?: string; args?: unknown } | null {

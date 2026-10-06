@@ -11,9 +11,9 @@ describe("GET /health", () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-health-"));
+    dir = mkdtempSync(join(tmpdir(), "openeval-health-"));
     app = await buildApp({
-      sqlitePath: join(dir, "evalrouter.sqlite"),
+      sqlitePath: join(dir, "openeval.sqlite"),
       apiKey: "test-key-not-a-secret",
     });
   });

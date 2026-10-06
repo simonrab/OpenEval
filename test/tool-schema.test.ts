@@ -37,6 +37,9 @@ const mutating = [
   "propose_rollout",
   "configure_live_automation",
   "run_live_decision_cycle",
+  "submit_outputs",
+  "configure_judge",
+  "calibrate_judge",
 ] as const;
 
 const readOnly = [
@@ -44,6 +47,9 @@ const readOnly = [
   "get_eval_report",
   "get_live_report",
   "get_decision_cycle_status",
+  "get_training_failures",
+  "get_verdict",
+  "get_eval_inputs",
 ] as const;
 
 function validInput(name: (typeof TOOL_NAMES)[number]): Record<string, unknown> {
@@ -120,6 +126,40 @@ function validInput(name: (typeof TOOL_NAMES)[number]): Record<string, unknown> 
       };
     case "get_decision_cycle_status":
       return { project_id: "prj_1" };
+    case "get_training_failures":
+      return { project_id: "prj_1", run_id: "run_1", candidate_id: "m/a" };
+    case "get_verdict":
+      return {
+        project_id: "prj_1",
+        baseline_run_id: "run_1",
+        baseline_candidate_id: "m/a",
+        candidate_run_id: "run_2",
+        candidate_id: "m/a#v2",
+      };    case "get_eval_inputs":
+      return { project_id: "prj_1", eval_set_id: "ste_1" };
+    case "submit_outputs":
+      return {
+        project_id: "prj_1",
+        eval_set_id: "ste_1",
+        candidate: { id: "harness#v1" },
+        outputs: [{ eval_id: "evl_1", output: "ok" }],
+        idempotency_key: "idem-1",
+      };
+    case "configure_judge":
+      return {
+        project_id: "prj_1",
+        eval_set_id: "ste_1",
+        judge_model: "openai/gpt-4.1-mini",
+        idempotency_key: "idem-1",
+      };
+    case "calibrate_judge":
+      return {
+        project_id: "prj_1",
+        eval_set_id: "ste_1",
+        keys_ref: "pkr_1",
+        max_eval_spend_usd: 1,
+        idempotency_key: "idem-1",
+      };
   }
 }
 
@@ -156,6 +196,12 @@ describe("tool schemas", () => {
         "configure_live_automation",
         "run_live_decision_cycle",
         "get_decision_cycle_status",
+        "get_training_failures",
+        "get_verdict",
+        "get_eval_inputs",
+        "submit_outputs",
+        "configure_judge",
+        "calibrate_judge",
       ],
     );
     for (const name of TOOL_NAMES) {
@@ -276,26 +322,59 @@ describe("input shapes", () => {
   });
 
   it("accepts every V1 program check kind", () => {
-    const kinds = [
-      "json_schema",
-      "regex_match",
-      "numeric_close",
-      "set_equals",
-      "tool_args",
-      "trace_rule",
-      "citation_support",
-      "retrieval_contains",
-      "pairwise_equals",
+    const checks: Array<{ kind: string; expected: unknown }> = [
+      { kind: "json_schema", expected: { type: "object" } },
+      { kind: "regex_match", expected: { pattern: "ABC-\\d+" } },
+      { kind: "numeric_close", expected: { value: 1, abs_tol: 0.1 } },
+      { kind: "set_equals", expected: { path: "ids", values: ["a"] } },
+      { kind: "tool_args", expected: {} },
+      { kind: "trace_rule", expected: {} },
+      { kind: "citation_support", expected: {} },
+      { kind: "retrieval_contains", expected: {} },
+      { kind: "pairwise_equals", expected: {} },
+      { kind: "contains_all", expected: { values: ["a"] } },
+      { kind: "contains_any", expected: { values: ["a"], case_insensitive: true } },
+      { kind: "length_range", expected: { max_words: 50 } },
     ];
-    for (const kind of kinds) {
+    for (const check of checks) {
       assert.equal(
         registerFailureInputSchema.safeParse({
           project_id: "prj_1",
           input: { prompt: "bad example" },
-          program_check: { kind, expected: {} },
-          idempotency_key: `idem-${kind}`,
+          program_check: check,
+          idempotency_key: `idem-${check.kind}`,
         }).success,
         true,
+        check.kind,
+      );
+    }
+  });
+
+  it("rejects program checks with a bad expected shape", () => {
+    const bad: Array<{ kind: string; expected: unknown }> = [
+      { kind: "regex_match", expected: {} },
+      { kind: "regex_match", expected: { pattern: "(a+)+$" } },
+      { kind: "regex_match", expected: { pattern: "x".repeat(201) } },
+      { kind: "regex_match", expected: { pattern: "a", flags: "g" } },
+      { kind: "numeric_close", expected: { value: "1" } },
+      { kind: "numeric_close", expected: { value: 1, rel_tol: 2 } },
+      { kind: "set_equals", expected: { path: "ids" } },
+      { kind: "contains_all", expected: { values: [] } },
+      { kind: "contains_any", expected: { values: [""] } },
+      { kind: "length_range", expected: {} },
+      { kind: "length_range", expected: { min_chars: 10, max_chars: 5 } },
+      { kind: "json_schema", expected: "object" },
+    ];
+    for (const check of bad) {
+      assert.equal(
+        registerFailureInputSchema.safeParse({
+          project_id: "prj_1",
+          input: { prompt: "bad example" },
+          program_check: check,
+          idempotency_key: `idem-${check.kind}`,
+        }).success,
+        false,
+        JSON.stringify(check),
       );
     }
   });
@@ -515,6 +594,8 @@ describe("output schemas", () => {
         quality: { n_pass: 27, n_fail: 3 },
         time_ms: { p50: 820, p95: 2100 },
         cost_usd: 0.42,
+        n_person_evals_not_graded: 0,
+        grader_advice: null,
         report_url: "https://example.invalid/report",
         approve_url: "https://example.invalid/approve?token=signed",
         next_action: {
@@ -570,6 +651,8 @@ describe("output schemas", () => {
       proposeRolloutOutputSchema.safeParse({
         rollout_id: "rlo_1",
         approve_url: "https://example.invalid/rollout-approve?rollout_id=rlo_1&token=signed",
+        from_candidate_id: "m/a",
+        to_candidate_id: "m/b#low",
         live_traffic_changed: false,
         next_action: {
           tool: null,
@@ -635,6 +718,8 @@ describe("output schemas", () => {
           named_model_still_passes: true,
           new_failures_missing_from_evals: false,
           limits_ok: true,
+          n_person_evals_not_graded: 0,
+          grader_advice: null,
         },
         named_model: { rec_id: "rec_1", model_id: "provider/model" },
         failing_eval_ids: [],

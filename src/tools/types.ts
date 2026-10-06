@@ -15,6 +15,12 @@ export const TOOL_NAMES = [
   "configure_live_automation",
   "run_live_decision_cycle",
   "get_decision_cycle_status",
+  "get_training_failures",
+  "get_verdict",
+  "get_eval_inputs",
+  "submit_outputs",
+  "configure_judge",
+  "calibrate_judge",
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -34,6 +40,7 @@ export const ASK_HUMAN = [
   "Pass a saved ste_",
   "Pass the saved named model",
   "named model rejected; do not write it into config",
+  "review the optimizer branch",
 ] as const;
 
 export type AskHuman = (typeof ASK_HUMAN)[number];
@@ -61,6 +68,7 @@ export const ErrorCode = {
   NOT_A_SAMPLE: "NOT_A_SAMPLE",
   POLICY_NOT_APPROVED: "POLICY_NOT_APPROVED",
   CANARY_NOT_ACTIVE: "CANARY_NOT_ACTIVE",
+  SCOPE_FORBIDDEN: "SCOPE_FORBIDDEN",
 } as const;
 
 export type ErrorCodeName = (typeof ErrorCode)[keyof typeof ErrorCode];

@@ -157,12 +157,12 @@ export function postModel(body: string | null): string {
 
 export function createHopFetch(opts: {
   app: FastifyInstance;
-  evalrouterUrl: string;
+  openevalUrl: string;
   isControlPlaneUp: () => boolean;
   vendorResponse: (model: string) => Response;
 }): HopFetchHarness {
   const calls: HopFetchCall[] = [];
-  const evalrouterBase = opts.evalrouterUrl.replace(/\/+$/, "");
+  const openevalBase = opts.openevalUrl.replace(/\/+$/, "");
 
   const fetchFn = (async (
     input: RequestInfo | URL,
@@ -185,7 +185,7 @@ export function createHopFetch(opts: {
       throw new TypeError("The control plane is down.");
     }
 
-    if (!url.startsWith(evalrouterBase)) {
+    if (!url.startsWith(openevalBase)) {
       calls.push({ method, url, body, vendorWaitMs: null });
       throw new TypeError(`Unexpected fetch URL: ${url}`);
     }

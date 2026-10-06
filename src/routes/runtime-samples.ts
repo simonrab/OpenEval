@@ -15,6 +15,7 @@ const sampleBodySchema = z
     project_id: z.string().min(1),
     policy_id: z.string().min(1),
     model_id: z.string().min(1),
+    candidate_id: z.string().min(1).optional(),
     why: z.enum(SAMPLE_WHY),
     input_redacted: z.string(),
     output_redacted: z.string(),
@@ -73,14 +74,15 @@ export async function registerRuntimeSamples(
     const createdAt = new Date().toISOString();
     db.prepare(
       `INSERT OR IGNORE INTO samples (
-         id, project_id, policy_id, model_id, why,
+         id, project_id, policy_id, model_id, candidate_id, why,
          input_redacted, output_redacted, captured_at, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       sampleId,
       body.project_id,
       body.policy_id,
       body.model_id,
+      body.candidate_id ?? null,
       body.why,
       redacted.input_redacted,
       redacted.output_redacted,
@@ -92,6 +94,7 @@ export async function registerRuntimeSamples(
       project_id: body.project_id,
       policy_id: body.policy_id,
       model_id: body.model_id,
+      candidate_id: body.candidate_id ?? null,
       why: body.why,
       input_redacted: redacted.input_redacted,
       output_redacted: redacted.output_redacted,

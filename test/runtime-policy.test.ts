@@ -86,8 +86,8 @@ describe("GET /v1/runtime/policies/:project_id", () => {
   let openRouterCalled = false;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-runtime-policy-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-runtime-policy-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     openRouterCalled = false;
     const openRouterClient = createMockOpenRouter(() => {
       openRouterCalled = true;

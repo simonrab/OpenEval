@@ -235,7 +235,7 @@ export async function registerApprove(
       timeP95: fmt.timeP95,
       costUsd: fmt.costUsd,
       failingEvals: fmt.failingEvals,
-      banner: `<p>Saved decision: ${escapeHtml(decision)}. EvalRouter did not write app config. live_traffic_changed = false.</p>`,
+      banner: `<p>Saved decision: ${escapeHtml(decision)}. OpenEval did not write app config. live_traffic_changed = false.</p>`,
     });
     return reply.type("text/html").send(html);
   });

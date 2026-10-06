@@ -3,10 +3,25 @@ import {
   type CatalogModel,
 } from "./catalog.js";
 
+/** Model call settings that a candidate can change. */
+export type ModelSettings = {
+  temperature?: number;
+  top_p?: number;
+  max_tokens?: number;
+  reasoning_effort?: "minimal" | "low" | "medium" | "high";
+};
+
+/** provider = cost reported by OpenRouter. estimate = token count times a flat rate. */
+export type CostSource = "provider" | "estimate";
+
 export type ChatCompletionResult = {
   content: string;
   time_ms: number;
   cost_usd: number;
+  cost_source?: CostSource;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  served_model?: string;
 };
 
 export type OpenRouterClient = {
@@ -15,13 +30,31 @@ export type OpenRouterClient = {
     prompt: string;
     apiKey: string;
     systemPrompt?: string;
+    settings?: ModelSettings;
   }): Promise<ChatCompletionResult>;
   listModels?(apiKey: string): Promise<CatalogModel[]>;
 };
 
+const REQUEST_TIMEOUT_MS = 120_000;
+const ESTIMATE_USD_PER_TOKEN = 0.000002;
+
+export function settingsBody(settings: ModelSettings | undefined): Record<string, unknown> {
+  if (!settings) {
+    return {};
+  }
+  const body: Record<string, unknown> = {};
+  if (settings.temperature != null) body.temperature = settings.temperature;
+  if (settings.top_p != null) body.top_p = settings.top_p;
+  if (settings.max_tokens != null) body.max_tokens = settings.max_tokens;
+  if (settings.reasoning_effort != null) {
+    body.reasoning = { effort: settings.reasoning_effort };
+  }
+  return body;
+}
+
 const OPENROUTER_HEADERS = {
-  "HTTP-Referer": "https://evalrouter.local",
-  "X-Title": "EvalRouter",
+  "HTTP-Referer": "https://openeval.local",
+  "X-Title": "OpenEval",
 } as const;
 
 async function listOpenRouterModels(
@@ -62,7 +95,7 @@ export function createOpenRouterClient(
   fetchFn: typeof fetch = fetch,
 ): OpenRouterClient {
   return {
-    async chatCompletion({ model, prompt, apiKey, systemPrompt }) {
+    async chatCompletion({ model, prompt, apiKey, systemPrompt, settings }) {
       const started = Date.now();
       const messages = [
         ...(systemPrompt && systemPrompt.length > 0
@@ -80,25 +113,42 @@ export function createOpenRouterClient(
         body: JSON.stringify({
           model,
           messages,
+          ...settingsBody(settings),
         }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`OpenRouter ${res.status}: ${text.slice(0, 200)}`);
       }
       const data = (await res.json()) as {
+        model?: string;
         choices?: Array<{ message?: { content?: string } }>;
-        usage?: { total_cost?: number; prompt_tokens?: number; completion_tokens?: number };
+        usage?: {
+          cost?: number;
+          total_cost?: number;
+          prompt_tokens?: number;
+          completion_tokens?: number;
+        };
       };
       const content = data.choices?.[0]?.message?.content ?? "";
       const elapsed = Date.now() - started;
-      let cost = data.usage?.total_cost ?? 0;
-      if (cost === 0) {
-        const tokens =
-          (data.usage?.prompt_tokens ?? 0) + (data.usage?.completion_tokens ?? 0);
-        cost = tokens * 0.000002;
-      }
-      return { content, time_ms: elapsed, cost_usd: cost };
+      const promptTokens = data.usage?.prompt_tokens ?? 0;
+      const completionTokens = data.usage?.completion_tokens ?? 0;
+      // OpenRouter reports the real charge as usage.cost.
+      const reported = data.usage?.cost ?? data.usage?.total_cost;
+      const hasReported = typeof reported === "number" && Number.isFinite(reported);
+      return {
+        content,
+        time_ms: elapsed,
+        cost_usd: hasReported
+          ? reported
+          : (promptTokens + completionTokens) * ESTIMATE_USD_PER_TOKEN,
+        cost_source: hasReported ? "provider" : "estimate",
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        served_model: typeof data.model === "string" ? data.model : undefined,
+      };
     },
     listModels(apiKey) {
       return listOpenRouterModels(fetchFn, apiKey);
@@ -178,7 +228,7 @@ export function createMockOpenRouter(
   catalog: CatalogModel[] = MOCK_CATALOG,
 ): OpenRouterClient {
   return {
-    async chatCompletion({ model, prompt, apiKey, systemPrompt }) {
+    async chatCompletion({ model, prompt, apiKey, systemPrompt, settings }) {
       void apiKey;
       void systemPrompt;
       if (typeof responses === "function") {

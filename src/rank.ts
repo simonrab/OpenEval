@@ -3,6 +3,7 @@ import {
   matchesAnyModelPattern,
   type CatalogModel,
 } from "./runner/catalog.js";
+import { baseModelId } from "./runner/candidates.js";
 
 export type JobLimits = {
   needs_images?: boolean;
@@ -20,6 +21,11 @@ export type RunResultRow = {
   passed: boolean;
   time_ms: number;
   cost_usd: number;
+  /** error rows are model calls that failed after retries. They are not scored. */
+  outcome?: "scored" | "error";
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  cost_source?: string | null;
 };
 
 export type ModelStats = {
@@ -32,6 +38,19 @@ export type ModelStats = {
   p95TimeMs: number;
   totalCostUsd: number;
   spendPer1kUsd: number;
+  /** Scored model calls, across all reps. */
+  nTrials: number;
+  nTrialPass: number;
+  /** Trial pass rate and its 95% Wilson interval. */
+  passRate: number;
+  passRateLow: number;
+  passRateHigh: number;
+  /** Evals where some reps passed and some failed. */
+  flakyEvalIds: string[];
+  /** Evals with no scored rep because every call failed. */
+  errorEvalIds: string[];
+  /** provider, estimate, caller, or mixed. */
+  costSource: string;
 };
 
 export type PickResult =
@@ -88,6 +107,27 @@ function percentile(values: number[], p: number): number {
 }
 
 
+/** 95% Wilson score interval for k passes in n trials. */
+export function wilsonInterval(k: number, n: number, z = 1.96): { low: number; high: number } {
+  if (n === 0) {
+    return { low: 0, high: 1 };
+  }
+  const p = k / n;
+  const z2 = z * z;
+  const denom = 1 + z2 / n;
+  const center = (p + z2 / (2 * n)) / denom;
+  const half = (z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / denom;
+  return { low: Math.max(0, center - half), high: Math.min(1, center + half) };
+}
+
+function costSourceOf(rows: RunResultRow[]): string {
+  const sources = new Set(rows.map((r) => r.cost_source ?? "estimate"));
+  if (sources.size === 0) {
+    return "estimate";
+  }
+  return sources.size === 1 ? [...sources][0]! : "mixed";
+}
+
 export function aggregateModelStats(
   results: RunResultRow[],
   trustedEvalIds: string[],
@@ -105,33 +145,66 @@ export function aggregateModelStats(
 
   const stats: ModelStats[] = [];
   for (const [modelId, rows] of byModel) {
-    const scoredEvalIds = new Set(rows.map((r) => r.eval_id));
-    const missing = trustedEvalIds.filter((id) => !scoredEvalIds.has(id));
-    const failingEvalIds = [
-      ...rows.filter((r) => !r.passed).map((r) => r.eval_id),
-      ...missing,
-    ];
-    const nPass = rows.filter((r) => r.passed).length;
-    const nFail = rows.length - nPass + missing.length;
-    const times = rows.map((r) => r.time_ms);
+    const scored = rows.filter((r) => (r.outcome ?? "scored") === "scored");
+    const byEval = new Map<string, RunResultRow[]>();
+    for (const r of scored) {
+      const list = byEval.get(r.eval_id) ?? [];
+      list.push(r);
+      byEval.set(r.eval_id, list);
+    }
+    const attemptedIds = new Set(rows.map((r) => r.eval_id));
+    const errorEvalIds = trustedEvalIds.filter(
+      (id) => attemptedIds.has(id) && !byEval.has(id),
+    );
+    const missing = trustedEvalIds.filter((id) => !byEval.has(id));
+
+    // An eval passes only when every scored rep passes.
+    const passingIds: string[] = [];
+    const failingIds: string[] = [];
+    const flakyEvalIds: string[] = [];
+    for (const [evalId, evalRows] of byEval) {
+      const passes = evalRows.filter((r) => r.passed).length;
+      if (passes === evalRows.length) {
+        passingIds.push(evalId);
+      } else {
+        failingIds.push(evalId);
+        if (passes > 0) {
+          flakyEvalIds.push(evalId);
+        }
+      }
+    }
+
+    const nTrials = scored.length;
+    const nTrialPass = scored.filter((r) => r.passed).length;
+    const interval = wilsonInterval(nTrialPass, nTrials);
+    const times = scored.map((r) => r.time_ms);
     const totalCostUsd = rows.reduce((sum, r) => sum + r.cost_usd, 0);
-    const tokenEstimate = Math.max(rows.length, 1) * ESTIMATED_TOKENS_PER_EVAL;
-    const spendPer1kUsd = (totalCostUsd / tokenEstimate) * 1000;
-    const passedAll =
-      missing.length === 0 &&
-      rows.length === trustedEvalIds.length &&
-      rows.every((r) => r.passed);
+    const tokens = scored.reduce(
+      (sum, r) => sum + (r.prompt_tokens ?? 0) + (r.completion_tokens ?? 0),
+      0,
+    );
+    const tokenCount =
+      tokens > 0 ? tokens : Math.max(scored.length, 1) * ESTIMATED_TOKENS_PER_EVAL;
+    const spendPer1kUsd = (totalCostUsd / tokenCount) * 1000;
 
     stats.push({
       modelId,
-      passedAll,
-      failingEvalIds: [...new Set(failingEvalIds)],
-      nPass,
-      nFail,
+      passedAll: missing.length === 0 && failingIds.length === 0,
+      failingEvalIds: [...new Set([...failingIds, ...missing])],
+      nPass: passingIds.length,
+      nFail: failingIds.length + missing.length,
       p50TimeMs: percentile(times, 50),
       p95TimeMs: percentile(times, 95),
       totalCostUsd,
       spendPer1kUsd,
+      nTrials,
+      nTrialPass,
+      passRate: nTrials === 0 ? 0 : nTrialPass / nTrials,
+      passRateLow: interval.low,
+      passRateHigh: interval.high,
+      flakyEvalIds,
+      errorEvalIds,
+      costSource: costSourceOf(scored),
     });
   }
   return stats;
@@ -147,7 +220,7 @@ export function applyHardLimits(
   }
   const live = liveCatalog ? catalogById(liveCatalog) : undefined;
   return stats.filter((s) => {
-    const catalog = catalogEntry(s.modelId, live);
+    const catalog = catalogEntry(baseModelId(s.modelId), live);
     if (limits.needs_images && !catalog.supportsImages) {
       return false;
     }
@@ -169,14 +242,14 @@ export function applyHardLimits(
     if (
       limits.allowed_models &&
       limits.allowed_models.length > 0 &&
-      !matchesAnyModelPattern(s.modelId, limits.allowed_models)
+      !matchesAnyModelPattern(baseModelId(s.modelId), limits.allowed_models)
     ) {
       return false;
     }
     if (
       limits.excluded_models &&
       limits.excluded_models.length > 0 &&
-      matchesAnyModelPattern(s.modelId, limits.excluded_models)
+      matchesAnyModelPattern(baseModelId(s.modelId), limits.excluded_models)
     ) {
       return false;
     }
@@ -195,8 +268,7 @@ function compareCheapestFast(a: ModelStats, b: ModelStats): number {
 const QUALITY_LIFT = 0.05;
 
 function passRate(s: ModelStats): number {
-  const n = s.nPass + s.nFail;
-  return n === 0 ? 0 : s.nPass / n;
+  return s.passRate;
 }
 
 function undominatedOnCostAndTime(stats: ModelStats[]): ModelStats[] {

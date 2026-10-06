@@ -90,7 +90,7 @@ export function formatMcpToolContent(body: unknown): string {
 
 export function createMcpServer(config: McpClientConfig): McpServer {
   const server = new McpServer(
-    { name: "evalrouter", version: "0.0.0" },
+    { name: "openeval", version: "0.0.0" },
     {
       instructions: MCP_INSTRUCTIONS,
     },

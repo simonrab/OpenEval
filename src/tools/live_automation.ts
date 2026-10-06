@@ -14,9 +14,12 @@ import {
   getProjectLiveState,
   promotePolicyCanaryToLastFull,
   rollbackToPolicy,
+  type PolicyModel,
   type PolicyRow,
   type SignedPolicy,
 } from "../policy.js";
+import { entryCandidateId } from "../live/request.js";
+import { baseModelId } from "../runner/candidates.js";
 import {
   listSampleGroups,
   markSampleGroupState,
@@ -54,6 +57,10 @@ export type AutomationConfig = {
   allowed_models: string[];
   max_eval_spend_usd: number;
   min_eval_pass_rate: number;
+  /** Lowest allowed Wilson 95% lower bound on the eval pass rate. null = no check. */
+  min_pass_rate_low: number | null;
+  /** When true, the eval cost must come from the provider, not an estimate. */
+  require_provider_cost: boolean;
   max_fallback_rate: number;
   max_miss_rate: number;
   min_canary_age_s: number;
@@ -86,6 +93,8 @@ const DEFAULT_CONFIG: Omit<AutomationConfig, "project_id" | "automation_id"> = {
   allowed_models: [],
   max_eval_spend_usd: 5,
   min_eval_pass_rate: 1,
+  min_pass_rate_low: null,
+  require_provider_cost: false,
   max_fallback_rate: 0.05,
   max_miss_rate: 0.01,
   min_canary_age_s: 0,
@@ -122,7 +131,8 @@ export function getAutomationConfig(
     .prepare(
       `SELECT project_id, automation_id, mode, auto_canary, auto_full,
               auto_rollback, allowed_models_json, max_eval_spend_usd,
-              min_eval_pass_rate, max_fallback_rate, max_miss_rate,
+              min_eval_pass_rate, min_pass_rate_low, require_provider_cost,
+              max_fallback_rate, max_miss_rate,
               min_canary_age_s, min_canary_requests, sample_flood_limit,
               expires_at, kill_switch, frozen
        FROM live_automation
@@ -139,6 +149,8 @@ export function getAutomationConfig(
         allowed_models_json: string;
         max_eval_spend_usd: number;
         min_eval_pass_rate: number;
+        min_pass_rate_low: number | null;
+        require_provider_cost: number | null;
         max_fallback_rate: number;
         max_miss_rate: number;
         min_canary_age_s: number;
@@ -162,6 +174,8 @@ export function getAutomationConfig(
     allowed_models: parseJsonArray(row.allowed_models_json),
     max_eval_spend_usd: row.max_eval_spend_usd,
     min_eval_pass_rate: row.min_eval_pass_rate,
+    min_pass_rate_low: row.min_pass_rate_low ?? null,
+    require_provider_cost: toBool(row.require_provider_cost),
     max_fallback_rate: row.max_fallback_rate,
     max_miss_rate: row.max_miss_rate,
     min_canary_age_s: row.min_canary_age_s,
@@ -181,6 +195,8 @@ function guardRules(config: AutomationConfig): Record<string, unknown> {
     allowed_models: config.allowed_models,
     max_eval_spend_usd: config.max_eval_spend_usd,
     min_eval_pass_rate: config.min_eval_pass_rate,
+    min_pass_rate_low: config.min_pass_rate_low,
+    require_provider_cost: config.require_provider_cost,
     max_fallback_rate: config.max_fallback_rate,
     max_miss_rate: config.max_miss_rate,
     min_canary_age_s: config.min_canary_age_s,
@@ -332,16 +348,31 @@ function invalidAutomationInput(message: string) {
   });
 }
 
-function modelAllowed(modelId: string, allowedModels: string[]): boolean {
+/**
+ * A pattern with `#` matches the whole setup id. A pattern without `#`
+ * matches the base model id, so it allows every setup of that model.
+ */
+function setupAllowed(entry: PolicyModel, allowedModels: string[]): boolean {
   if (allowedModels.length === 0) {
     return true;
   }
+  const candidateId = entryCandidateId(entry);
+  const modelId = baseModelId(entry.model_id);
   return allowedModels.some((pattern) => {
+    const subject = pattern.includes("#") ? candidateId : modelId;
     if (pattern.endsWith("*")) {
-      return modelId.startsWith(pattern.slice(0, -1));
+      return subject.startsWith(pattern.slice(0, -1));
     }
-    return modelId === pattern;
+    return subject === pattern;
   });
+}
+
+function policySetupId(db: Database.Database, policyId: string | null): string | null {
+  if (!policyId) {
+    return null;
+  }
+  const policy = parsePolicy(getPolicyRow(db, policyId));
+  return policy ? entryCandidateId(policy.primary) : null;
 }
 
 function parsePolicy(row: PolicyRow | null): SignedPolicy | null {
@@ -355,43 +386,98 @@ function parsePolicy(row: PolicyRow | null): SignedPolicy | null {
   }
 }
 
-function recommendationEvidence(
+export type RecommendationEvidence = {
+  /** Share of trusted evals passed (n_pass / (n_pass + n_fail)). */
+  passRate: number;
+  /** Share of trials passed, from the run stats. null on old rows. */
+  trialPassRate: number | null;
+  passRateCi95: [number, number] | null;
+  nTrials: number | null;
+  flakyCount: number;
+  costSource: string | null;
+  failingEvalIds: string[];
+};
+
+/** Run stats behind a recommendation. Old rows have n_pass and n_fail only. */
+export function recommendationEvidence(
   db: Database.Database,
   recId: string,
-): {
-  passRate: number;
-  failingEvalIds: string[];
-} {
+): RecommendationEvidence {
   const row = db
     .prepare(
-      `SELECT quality_json, failing_eval_ids
+      `SELECT quality_json, failing_eval_ids, cost_source
        FROM recommendations
        WHERE id = ?`,
     )
     .get(recId) as
-    | { quality_json: string; failing_eval_ids: string }
+    | { quality_json: string; failing_eval_ids: string; cost_source: string | null }
     | undefined;
+  const empty: RecommendationEvidence = {
+    passRate: 0,
+    trialPassRate: null,
+    passRateCi95: null,
+    nTrials: null,
+    flakyCount: 0,
+    costSource: null,
+    failingEvalIds: [],
+  };
   if (!row) {
-    return { passRate: 0, failingEvalIds: [] };
+    return empty;
   }
-  let pass = 0;
-  let fail = 0;
+  let quality: Record<string, unknown> = {};
   try {
-    const quality = JSON.parse(row.quality_json) as {
-      n_pass?: unknown;
-      n_fail?: unknown;
-    };
-    pass = typeof quality.n_pass === "number" ? quality.n_pass : 0;
-    fail = typeof quality.n_fail === "number" ? quality.n_fail : 0;
+    const parsed = JSON.parse(row.quality_json) as unknown;
+    if (parsed !== null && typeof parsed === "object") {
+      quality = parsed as Record<string, unknown>;
+    }
   } catch {
-    pass = 0;
-    fail = 0;
+    quality = {};
   }
+  const num = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  const pass = num(quality.n_pass) ?? 0;
+  const fail = num(quality.n_fail) ?? 0;
   const total = pass + fail;
+  const ci = quality.pass_rate_ci95;
+  const passRateCi95 =
+    Array.isArray(ci) && ci.length === 2 && num(ci[0]) !== null && num(ci[1]) !== null
+      ? ([ci[0], ci[1]] as [number, number])
+      : null;
   return {
     passRate: total === 0 ? 0 : pass / total,
+    trialPassRate: num(quality.pass_rate),
+    passRateCi95,
+    nTrials: num(quality.n_trials),
+    flakyCount: Array.isArray(quality.flaky_eval_ids) ? quality.flaky_eval_ids.length : 0,
+    costSource: row.cost_source,
     failingEvalIds: parseJsonArray(row.failing_eval_ids),
   };
+}
+
+/** Evidence guard rules. Returns a blocked reason or null. */
+export function evidenceBlockReason(
+  config: Pick<
+    AutomationConfig,
+    "min_eval_pass_rate" | "min_pass_rate_low" | "require_provider_cost"
+  >,
+  evidence: RecommendationEvidence,
+): string | null {
+  if (evidence.failingEvalIds.length > 0) {
+    return "failed_trusted_eval";
+  }
+  if (evidence.passRate < config.min_eval_pass_rate) {
+    return "eval_pass_rate_low";
+  }
+  if (
+    config.min_pass_rate_low !== null &&
+    (evidence.passRateCi95 === null || evidence.passRateCi95[0] < config.min_pass_rate_low)
+  ) {
+    return "eval_pass_rate_bound_low";
+  }
+  if (config.require_provider_cost && evidence.costSource !== "provider") {
+    return "eval_cost_not_provider";
+  }
+  return null;
 }
 
 function blockedCycle(
@@ -483,10 +569,11 @@ export const handleConfigureLiveAutomation: ToolHandler = (body, ctx) => {
     `INSERT INTO live_automation (
        project_id, automation_id, mode, auto_canary, auto_full,
        auto_rollback, allowed_models_json, max_eval_spend_usd,
-       min_eval_pass_rate, max_fallback_rate, max_miss_rate,
+       min_eval_pass_rate, min_pass_rate_low, require_provider_cost,
+       max_fallback_rate, max_miss_rate,
        min_canary_age_s, min_canary_requests, sample_flood_limit,
        expires_at, kill_switch, frozen, approved_by, configured_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_id) DO UPDATE SET
        automation_id = excluded.automation_id,
        mode = excluded.mode,
@@ -496,6 +583,8 @@ export const handleConfigureLiveAutomation: ToolHandler = (body, ctx) => {
        allowed_models_json = excluded.allowed_models_json,
        max_eval_spend_usd = excluded.max_eval_spend_usd,
        min_eval_pass_rate = excluded.min_eval_pass_rate,
+       min_pass_rate_low = excluded.min_pass_rate_low,
+       require_provider_cost = excluded.require_provider_cost,
        max_fallback_rate = excluded.max_fallback_rate,
        max_miss_rate = excluded.max_miss_rate,
        min_canary_age_s = excluded.min_canary_age_s,
@@ -516,6 +605,8 @@ export const handleConfigureLiveAutomation: ToolHandler = (body, ctx) => {
     JSON.stringify(rules.allowed_models ?? []),
     rules.max_eval_spend_usd ?? DEFAULT_CONFIG.max_eval_spend_usd,
     rules.min_eval_pass_rate ?? DEFAULT_CONFIG.min_eval_pass_rate,
+    rules.min_pass_rate_low ?? null,
+    rules.require_provider_cost === true ? 1 : 0,
     rules.max_fallback_rate ?? DEFAULT_CONFIG.max_fallback_rate,
     rules.max_miss_rate ?? DEFAULT_CONFIG.max_miss_rate,
     rules.min_canary_age_s ?? DEFAULT_CONFIG.min_canary_age_s,
@@ -694,7 +785,12 @@ export const handleRunLiveDecisionCycle: ToolHandler = (body, ctx) => {
         project_id: input.project_id,
         cycle_id: cycleId,
         event_type: "auto_rollback",
-        body: { policy_id: target, reason: safetyReason },
+        body: {
+          policy_id: target,
+          candidate_id: policySetupId(db, target),
+          from_candidate_id: policySetupId(db, live.canary_policy_id),
+          reason: safetyReason,
+        },
       });
       const row = insertCycle(db, {
         id: cycleId,
@@ -791,7 +887,11 @@ export const handleRunLiveDecisionCycle: ToolHandler = (body, ctx) => {
         project_id: input.project_id,
         cycle_id: cycleId,
         event_type: "auto_full",
-        body: { policy_id: live.canary_policy_id },
+        body: {
+          policy_id: live.canary_policy_id,
+          candidate_id: policySetupId(db, live.canary_policy_id),
+          from_candidate_id: policySetupId(db, live.last_full_policy_id),
+        },
       });
       const row = insertCycle(db, {
         id: cycleId,
@@ -918,7 +1018,7 @@ export const handleRunLiveDecisionCycle: ToolHandler = (body, ctx) => {
       return { status: 200, body: output };
     }
     const policy = parsePolicy(getPolicyRow(db, draftId));
-    if (!policy || !modelAllowed(policy.primary.model_id, config.allowed_models)) {
+    if (!policy || !setupAllowed(policy.primary, config.allowed_models)) {
       const output = blockedCycle(db, config, {
         cycle_id: cycleId,
         reason: "model_not_allowed",
@@ -936,27 +1036,11 @@ export const handleRunLiveDecisionCycle: ToolHandler = (body, ctx) => {
       return { status: 200, body: output };
     }
     const evidence = recommendationEvidence(db, policy.rec_id);
-    if (evidence.failingEvalIds.length > 0) {
+    const evidenceReason = evidenceBlockReason(config, evidence);
+    if (evidenceReason !== null) {
       const output = blockedCycle(db, config, {
         cycle_id: cycleId,
-        reason: "failed_trusted_eval",
-        audit_ids: auditIds,
-        started_at: startedAt,
-      });
-      storeIdempotentResponse(
-        db,
-        "run_live_decision_cycle",
-        input.idempotency_key,
-        200,
-        output,
-        input.project_id,
-      );
-      return { status: 200, body: output };
-    }
-    if (evidence.passRate < config.min_eval_pass_rate) {
-      const output = blockedCycle(db, config, {
-        cycle_id: cycleId,
-        reason: "eval_pass_rate_low",
+        reason: evidenceReason,
         audit_ids: auditIds,
         started_at: startedAt,
       });
@@ -975,7 +1059,19 @@ export const handleRunLiveDecisionCycle: ToolHandler = (body, ctx) => {
         project_id: input.project_id,
         cycle_id: cycleId,
         event_type: "auto_canary",
-        body: { policy_id: draftId, percent: CANARY_PERCENT },
+        body: {
+          policy_id: draftId,
+          candidate_id: entryCandidateId(policy.primary),
+          from_candidate_id: policySetupId(db, live?.last_full_policy_id ?? null),
+          percent: CANARY_PERCENT,
+          evidence: {
+            pass_rate: evidence.trialPassRate ?? evidence.passRate,
+            pass_rate_ci95: evidence.passRateCi95,
+            n_trials: evidence.nTrials,
+            n_flaky: evidence.flakyCount,
+            cost_source: evidence.costSource,
+          },
+        },
       });
       const row = insertCycle(db, {
         id: cycleId,

@@ -10,6 +10,7 @@ import { buildMarkUrl, signMarkToken } from "../mark/tokens.js";
 import {
   ensureProjectPeople,
   queuePersonEvals,
+  setMarkOutputs,
 } from "../mark/store.js";
 import type { ToolHandler } from "../dispatch.js";
 import {
@@ -47,6 +48,9 @@ export const handleQueueForLabeling: ToolHandler = (body, ctx) => {
   }
 
   ensureProjectPeople(db, input.project_id);
+  const nOutputsShown = input.outputs
+    ? setMarkOutputs(db, input.eval_set_id, input.outputs)
+    : undefined;
   queuePersonEvals(db, input.eval_set_id, input.eval_ids ?? null);
 
   const personQueued = db
@@ -68,6 +72,7 @@ export const handleQueueForLabeling: ToolHandler = (body, ctx) => {
 
   const output = queueForLabelingOutputSchema.parse({
     n_queued: nQueued,
+    ...(nOutputsShown !== undefined ? { n_outputs_shown: nOutputsShown } : {}),
     mark_url: markUrl,
     next_action:
       nQueued > 0

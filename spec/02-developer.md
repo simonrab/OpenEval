@@ -1,4 +1,4 @@
-# EvalRouter — developer spec
+# OpenEval — developer spec
 
 This slice is for the person who owns the AI feature.
 The coding agent, the second marker, and CI are other slices.

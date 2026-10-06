@@ -5,6 +5,11 @@ import { getEvalSet, listMembers } from "../eval-set.js";
 import { projectExists } from "../keys.js";
 import { buildReportUrl } from "../report-token.js";
 import { getRun, listRunResults } from "../runner/queue.js";
+import { countPersonEvalsNotGraded } from "../runner/score.js";
+import { graderAdvice } from "../judge/advice.js";
+import { aggregateModelStats } from "../rank.js";
+import { ensureEvalSplit } from "../splits.js";
+import { isOptimizerScope } from "./scope.js";
 import type { ToolHandler } from "../dispatch.js";
 import {
   getEvalReportOutputSchema,
@@ -59,6 +64,7 @@ export function buildReport(
   input: ReportInput,
   baseUrl: string,
   apiKey: string,
+  opts: { redactHoldout?: boolean } = {},
 ): { status: number; body: unknown } {
   if (!projectExists(db, input.project_id)) {
     return { status: 404, body: projectNotFoundError(input.project_id) };
@@ -96,20 +102,79 @@ export function buildReport(
   const members = listMembers(db, run.eval_set_id);
   const trusted = members.filter((m) => m.status === "trusted");
   const trustedIds = new Set(trusted.map((m) => m.eval_id));
-  const results = listRunResults(db, run.id);
+  const allResults = listRunResults(db, run.id);
+  // Calls that failed after retries are not scored. They are not quality fails.
+  const results = allResults.filter((r) => r.outcome !== "error");
 
   const limit = input.limit ?? 20;
   const offset = decodeCursor(input.cursor);
-  const modelIds = parseRunModels(run.models, results);
+  const modelIds = parseRunModels(run.models, allResults);
+  const statsById = new Map(
+    aggregateModelStats(
+      allResults.map((r) => ({
+        model_id: r.model_id,
+        eval_id: r.eval_id,
+        passed: r.passed === 1,
+        time_ms: r.time_ms,
+        cost_usd: r.cost_usd,
+        outcome: r.outcome,
+        prompt_tokens: r.prompt_tokens,
+        completion_tokens: r.completion_tokens,
+        cost_source: r.cost_source,
+      })),
+      trusted.map((m) => m.eval_id),
+    ).map((s) => [s.modelId, s]),
+  );
   const modelSummaries = summarizeModelResults(
     results,
     trusted.map((m) => m.eval_id),
     modelIds,
-  );
+  ).map((summary) => {
+    const stats = statsById.get(summary.model_id);
+    if (!stats) {
+      return summary;
+    }
+    return {
+      ...summary,
+      n_trials: stats.nTrials,
+      pass_rate: stats.passRate,
+      pass_rate_ci95: [stats.passRateLow, stats.passRateHigh] as [number, number],
+      flaky_eval_ids: stats.flakyEvalIds,
+      error_eval_ids: stats.errorEvalIds,
+      cost_usd: stats.totalCostUsd,
+      cost_source: stats.costSource as "provider" | "estimate" | "caller" | "mixed",
+      spend_per_1k_tokens_usd: stats.spendPer1kUsd,
+    };
+  });
   const aggregated = aggregateResults(results, members);
-  const page = aggregated.slice(offset, offset + limit);
+  // Items also list evals that have only error rows, so the agent sees why.
+  const scoredSet = new Set(results.map((r) => r.eval_id));
+  const itemRows = allResults
+    .filter((r) => r.outcome !== "error" || !scoredSet.has(r.eval_id))
+    .map((r) =>
+      r.outcome === "error"
+        ? { ...r, reason_short: `not scored: ${r.reason_short}` }
+        : r,
+    );
+  // An optimizer key sees train evals only. Holdout shows as counts.
+  const split = opts.redactHoldout ? ensureEvalSplit(db, run.eval_set_id).splits : null;
+  const shown = (id: string) => !split || split.get(id) === "train";
+  const items = aggregateResults(itemRows, members).filter((r) => shown(r.eval_id));
+  const page = items.slice(offset, offset + limit);
   const nextOffset = offset + page.length;
-  const hasMore = nextOffset < aggregated.length;
+  const hasMore = nextOffset < items.length;
+
+  const holdoutRedacted = split
+    ? (() => {
+        const held = [...split].filter(([, s]) => s === "holdout").map(([id]) => id);
+        const rows = aggregated.filter((r) => held.includes(r.eval_id));
+        return {
+          n_evals: held.length,
+          n_pass: rows.filter((r) => r.passed).length,
+          n_fail: rows.filter((r) => !r.passed).length,
+        };
+      })()
+    : undefined;
 
   const nPass = aggregated.filter((r) => r.passed).length;
   const nFail = aggregated.filter((r) => !r.passed).length;
@@ -122,6 +187,7 @@ export function buildReport(
     .map((m) => m.eval_id);
 
   const newFailuresMissing = checkNewFailuresMissing(run, members);
+  const nNotGraded = countPersonEvalsNotGraded(results);
 
   const failingEvalIds = [
     ...new Set(aggregated.filter((r) => !r.passed).map((r) => r.eval_id)),
@@ -203,6 +269,11 @@ export function buildReport(
       namedModelSummary.n_pass === trusted.length
     : null;
 
+  if (split && (nextTool === "recommend_models" || nextTool === "register_failure")) {
+    nextTool = "get_training_failures";
+    nextArgs = { project_id: input.project_id, run_id: run.id, candidate_id: modelIds[0] ?? "" };
+  }
+
   const output = getEvalReportOutputSchema.parse({
     status: runStatus,
     code,
@@ -217,12 +288,21 @@ export function buildReport(
       named_model_still_passes: namedModelStillPasses,
       new_failures_missing_from_evals: newFailuresMissing,
       limits_ok: true,
+      n_person_evals_not_graded: nNotGraded,
+      grader_advice: graderAdvice(db, run.eval_set_id, nNotGraded),
     },
     named_model: namedModel,
-    failing_eval_ids: failingEvalIds,
-    eval_ids_scored: scoredEvalIds.filter((id) => trustedIds.has(id)),
-    eval_ids_not_scored: evalIdsNotScored,
-    models: modelSummaries,
+    failing_eval_ids: failingEvalIds.filter(shown),
+    eval_ids_scored: scoredEvalIds.filter((id) => trustedIds.has(id) && shown(id)),
+    eval_ids_not_scored: evalIdsNotScored.filter(shown),
+    models: split
+      ? modelSummaries.map((m) => ({
+          ...m,
+          failing_eval_ids: m.failing_eval_ids.filter(shown),
+          ...("flaky_eval_ids" in m ? { flaky_eval_ids: m.flaky_eval_ids.filter(shown) } : {}),
+          ...("error_eval_ids" in m ? { error_eval_ids: m.error_eval_ids.filter(shown) } : {}),
+        }))
+      : modelSummaries,
     items: page.map((r) => ({
       eval_id: r.eval_id,
       title: r.title,
@@ -233,10 +313,13 @@ export function buildReport(
     })),
     next_cursor: hasMore ? encodeCursor(nextOffset) : null,
     truncated: hasMore,
-    report_url: buildReportUrl(baseUrl, apiKey, {
-      project_id: input.project_id,
-      run_id: run.id,
-    }),
+    report_url: split
+      ? null
+      : buildReportUrl(baseUrl, apiKey, {
+          project_id: input.project_id,
+          run_id: run.id,
+        }),
+    ...(holdoutRedacted ? { holdout_redacted: holdoutRedacted } : {}),
     live_traffic_changed: false,
     ci_exit: ciExit,
     next_action: {
@@ -284,11 +367,14 @@ function summarizeModelResults(
     const rows = results.filter(
       (r) => r.model_id === modelId && trustedSet.has(r.eval_id),
     );
-    const passedIds = new Set(
-      rows.filter((r) => r.passed === 1).map((r) => r.eval_id),
-    );
+    // An eval passes only when every rep passes.
     const failedIds = new Set(
       rows.filter((r) => r.passed !== 1).map((r) => r.eval_id),
+    );
+    const passedIds = new Set(
+      rows
+        .filter((r) => r.passed === 1 && !failedIds.has(r.eval_id))
+        .map((r) => r.eval_id),
     );
     for (const evalId of trustedEvalIds) {
       if (!passedIds.has(evalId) && !failedIds.has(evalId)) {
@@ -340,15 +426,23 @@ function aggregateResults(
     if (!rows || rows.length === 0) {
       continue;
     }
-    const passedRows = rows.filter((r) => r.passed === 1);
+    // A model passes an eval only when every rep passes.
+    const failedModels = new Set(
+      rows.filter((r) => r.passed !== 1).map((r) => r.model_id),
+    );
+    const passedRows = rows.filter(
+      (r, i) =>
+        r.passed === 1 &&
+        !failedModels.has(r.model_id) &&
+        rows.findIndex((o) => o.model_id === r.model_id) === i,
+    );
     if (passedRows.length > 0) {
-      const failedRows = rows.filter((r) => r.passed !== 1);
       const reason =
-        failedRows.length === 0
+        failedModels.size === 0
           ? passedRows[0]!.reason_short
           : `passed by ${passedRows.map((r) => r.model_id).join(", ")}; ${
-              failedRows.length
-            } model ${failedRows.length === 1 ? "miss" : "misses"}`;
+              failedModels.size
+            } model ${failedModels.size === 1 ? "miss" : "misses"}`;
       out.push({
         eval_id: member.eval_id,
         title: member.title,
@@ -377,5 +471,7 @@ export const handleGetEvalReport: ToolHandler = (body, ctx) => {
     throw new Error("get_eval_report requires db on ToolContext");
   }
   const baseUrl = ctx.baseUrl ?? "http://127.0.0.1:3000";
-  return buildReport(db, body as ReportInput, baseUrl, ctx.apiKey ?? "");
+  return buildReport(db, body as ReportInput, baseUrl, ctx.apiKey ?? "", {
+    redactHoldout: isOptimizerScope(ctx),
+  });
 };

@@ -61,8 +61,8 @@ describe("Guarded Autopilot V2", () => {
   let projectId: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-v2-automation-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-v2-automation-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await buildApp({
       sqlitePath,
       apiKey,

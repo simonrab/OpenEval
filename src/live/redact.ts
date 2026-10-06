@@ -9,6 +9,7 @@ export type LiveSample = {
   project_id: string;
   policy_id: string;
   model_id: string;
+  candidate_id?: string;
   why: SampleWhy;
   input_redacted: string;
   output_redacted: string;

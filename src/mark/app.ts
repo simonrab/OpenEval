@@ -145,6 +145,17 @@ function loadFormRenderMeta(
   );
 }
 
+function outputSection(markOutput: string | null): string {
+  if (!markOutput) {
+    return "";
+  }
+  return `<section class="box output">
+  <h2>Output to mark</h2>
+  <p class="meta">Mark this output. Pass means this output meets the job.</p>
+  <pre>${escapeHtml(markOutput)}</pre>
+</section>`;
+}
+
 function draftSection(draftMark: string | null): string {
   if (!draftMark) {
     return "";
@@ -307,6 +318,7 @@ function renderScreen(opts: {
   fileSection: string;
   regionSection: string;
   draftMark: string | null;
+  markOutput?: string | null;
   formType: MarkFormType;
   formMeta: FormRenderMeta;
   personOptionsHtml: string;
@@ -324,7 +336,7 @@ function renderScreen(opts: {
     .replace("{{FILE_SECTION}}", opts.fileSection)
     .replace("{{REGION_SECTION}}", opts.regionSection)
     .replace("{{INPUT}}", escapeHtml(opts.input))
-    .replace("{{DRAFT_SECTION}}", draftSection(opts.draftMark))
+    .replace("{{DRAFT_SECTION}}", outputSection(opts.markOutput ?? null) + draftSection(opts.draftMark))
     .replace("{{FORM_FIELDS}}", renderFormFields(opts.formType, opts.draftMark, opts.formMeta))
     .replace("{{PERSON_OPTIONS}}", opts.personOptionsHtml)
     .replace("{{BANNER}}", opts.banner);
@@ -340,6 +352,7 @@ function renderThird(opts: {
   fileSection: string;
   regionSection: string;
   draftMark: string | null;
+  markOutput?: string | null;
   formType: MarkFormType;
   formMeta: FormRenderMeta;
   priorMarksHtml: string;
@@ -358,7 +371,7 @@ function renderThird(opts: {
     .replace("{{FILE_SECTION}}", opts.fileSection)
     .replace("{{REGION_SECTION}}", opts.regionSection)
     .replace("{{INPUT}}", escapeHtml(opts.input))
-    .replace("{{DRAFT_SECTION}}", draftSection(opts.draftMark))
+    .replace("{{DRAFT_SECTION}}", outputSection(opts.markOutput ?? null) + draftSection(opts.draftMark))
     .replace("{{FORM_FIELDS}}", renderFormFields(opts.formType, opts.draftMark, opts.formMeta))
     .replace("{{PRIOR_MARKS}}", opts.priorMarksHtml)
     .replace("{{PICK_OPTIONS}}", opts.pickOptions)
@@ -471,10 +484,11 @@ export async function registerMarkRoutes(
       };
     const row = db
       .prepare(
-        `SELECT draft_mark, input_truncated, score_how FROM evals WHERE id = ?`,
+        `SELECT draft_mark, mark_output, input_truncated, score_how FROM evals WHERE id = ?`,
       )
       .get(next.eval_id) as {
       draft_mark: string | null;
+      mark_output: string | null;
       input_truncated: string;
       score_how: "code" | "person";
     };
@@ -497,6 +511,7 @@ export async function registerMarkRoutes(
       ),
       regionSection: regionSectionHtml(formMeta.needsRegion),
       draftMark: row.draft_mark,
+      markOutput: row.mark_output,
       formType,
       formMeta,
       personOptionsHtml: personOptions(people, markedIds),
@@ -578,8 +593,12 @@ export async function registerMarkRoutes(
         must_never: "",
       };
     const row = db
-      .prepare(`SELECT draft_mark, input_truncated FROM evals WHERE id = ?`)
-      .get(evalId) as { draft_mark: string | null; input_truncated: string };
+      .prepare(`SELECT draft_mark, mark_output, input_truncated FROM evals WHERE id = ?`)
+      .get(evalId) as {
+      draft_mark: string | null;
+      mark_output: string | null;
+      input_truncated: string;
+    };
     const set = db
       .prepare("SELECT project_id FROM eval_sets WHERE id = ?")
       .get(evalSetId) as { project_id: string };
@@ -601,6 +620,7 @@ export async function registerMarkRoutes(
       ),
       regionSection: regionSectionHtml(formMeta.needsRegion),
       draftMark: row.draft_mark,
+      markOutput: row.mark_output,
       formType,
       formMeta,
       personOptionsHtml: personOptions(people, [personId]),
@@ -657,10 +677,11 @@ export async function registerMarkRoutes(
       };
     const row = db
       .prepare(
-        `SELECT draft_mark, input_truncated, score_how FROM evals WHERE id = ?`,
+        `SELECT draft_mark, mark_output, input_truncated, score_how FROM evals WHERE id = ?`,
       )
       .get(evalId) as {
       draft_mark: string | null;
+      mark_output: string | null;
       input_truncated: string;
       score_how: "code" | "person";
     };
@@ -695,6 +716,7 @@ export async function registerMarkRoutes(
       ),
       regionSection: regionSectionHtml(formMeta.needsRegion),
       draftMark: row.draft_mark,
+      markOutput: row.mark_output,
       formType,
       formMeta,
       priorMarksHtml: priorHtml,

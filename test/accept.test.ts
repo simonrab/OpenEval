@@ -72,8 +72,8 @@ describe("accept screen (J1)", () => {
   let sqlitePath: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-accept-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-accept-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await buildApp({ sqlitePath, apiKey });
   });
 

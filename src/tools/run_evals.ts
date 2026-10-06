@@ -1,7 +1,10 @@
 import {
+  getRecommendationCandidate,
+  getRecommendationReps,
   recheckModelIds,
   validateRecheckNamedModel,
 } from "../ci/recheck.js";
+import type { Candidate } from "../runner/candidates.js";
 import {
   agentError,
   costCapRequiredError,
@@ -28,12 +31,15 @@ import type { z } from "zod";
 
 type RunEvalsInput = z.infer<typeof runEvalsInputSchema>;
 
-function estimateCost(modelCount: number, evalCount: number): number {
-  return Math.round(modelCount * evalCount * 0.05 * 100) / 100;
+/** Three runs per eval give a pass rate with a confidence range. One run hides noise. */
+export const DEFAULT_REPS = 3;
+
+function estimateCost(callCount: number, evalCount: number): number {
+  return Math.round(callCount * evalCount * 0.05 * 100) / 100;
 }
 
-function estimateEta(modelCount: number, evalCount: number): number {
-  return modelCount * evalCount * 3;
+function estimateEta(callCount: number, evalCount: number): number {
+  return callCount * evalCount * 3;
 }
 
 function noModelsFitError(): ReturnType<typeof agentError> {
@@ -130,8 +136,14 @@ export const handleRunEvals: ToolHandler = async (body, ctx) => {
   }
 
   let models: string[];
+  let candidates: Candidate[] | null = null;
   if (intent === "recheck" && input.named_model) {
     models = recheckModelIds(input.named_model);
+    const stored = getRecommendationCandidate(db, input.named_model.rec_id);
+    candidates = stored ? [stored] : null;
+  } else if (input.candidates && input.candidates.length > 0) {
+    candidates = input.candidates as Candidate[];
+    models = candidates.map((c) => c.id);
   } else if (input.models && input.models.length > 0) {
     models = input.models;
   } else {
@@ -159,6 +171,11 @@ export const handleRunEvals: ToolHandler = async (body, ctx) => {
     models = picked.map((m) => m.id);
   }
   const trustedEvals = members.filter((m) => m.status === "trusted");
+  const reps =
+    input.reps ??
+    (intent === "recheck" && input.named_model
+      ? (getRecommendationReps(db, input.named_model.rec_id) ?? 1)
+      : DEFAULT_REPS);
   const runId = newRunId();
   const now = new Date().toISOString();
   const version = input.eval_set_version ?? evalSet.version;
@@ -167,8 +184,8 @@ export const handleRunEvals: ToolHandler = async (body, ctx) => {
     `INSERT INTO runs
       (id, project_id, eval_set_id, eval_set_version, status, code, models,
        max_eval_spend_usd, keys_ref, intent, named_model, new_failures,
-       spend_usd, idempotency_key, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'queued', NULL, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+       spend_usd, idempotency_key, created_at, updated_at, reps, candidates)
+     VALUES (?, ?, ?, ?, 'queued', NULL, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
   ).run(
     runId,
     input.project_id,
@@ -183,13 +200,15 @@ export const handleRunEvals: ToolHandler = async (body, ctx) => {
     input.idempotency_key,
     now,
     now,
+    reps,
+    candidates ? JSON.stringify(candidates) : null,
   );
 
   const output = runEvalsOutputSchema.parse({
     run_id: runId,
     status: "queued",
-    eta_s: estimateEta(models.length, trustedEvals.length),
-    est_cost_usd: estimateCost(models.length, trustedEvals.length),
+    eta_s: estimateEta(models.length * reps, trustedEvals.length),
+    est_cost_usd: estimateCost(models.length * reps, trustedEvals.length),
     next_action: {
       tool: "get_eval_report",
       args: { project_id: input.project_id, run_id: runId },

@@ -69,8 +69,8 @@ describe("mark screen flow (J3)", () => {
   let third: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-mark-screen-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-mark-screen-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await createTestApp(sqlitePath);
     const proj = await app.inject({
       method: "POST",

@@ -7,6 +7,7 @@ export type SampleRow = {
   project_id: string;
   policy_id: string;
   model_id: string;
+  candidate_id: string | null;
   why: string;
   input_redacted: string;
   output_redacted: string;
@@ -19,6 +20,7 @@ export type SampleGroupRow = {
   project_id: string;
   policy_id: string;
   model_id: string;
+  candidate_id: string | null;
   why: string;
   fingerprint: string;
   state: string;
@@ -32,16 +34,19 @@ function sampleFingerprint(row: {
   project_id: string;
   policy_id: string;
   model_id: string;
+  candidate_id?: string | null;
   why: string;
   input_redacted: string;
   output_redacted: string;
 }): string {
+  // candidate_id joins the key only when set, so old fingerprints stay the same.
   return createHash("sha256")
     .update(
       JSON.stringify({
         project_id: row.project_id,
         policy_id: row.policy_id,
         model_id: row.model_id,
+        ...(row.candidate_id ? { candidate_id: row.candidate_id } : {}),
         why: row.why,
         input_redacted: row.input_redacted,
         output_redacted: row.output_redacted,
@@ -57,7 +62,7 @@ export function getSample(
 ): SampleRow | null {
   const row = db
     .prepare(
-      `SELECT id, project_id, policy_id, model_id, why,
+      `SELECT id, project_id, policy_id, model_id, candidate_id, why,
               input_redacted, output_redacted, captured_at, dropped_at
        FROM samples
        WHERE id = ?`,
@@ -104,7 +109,7 @@ export function listStoredSamples(
 ): SampleRow[] {
   return db
     .prepare(
-      `SELECT id, project_id, policy_id, model_id, why,
+      `SELECT id, project_id, policy_id, model_id, candidate_id, why,
               input_redacted, output_redacted, captured_at, dropped_at
        FROM samples
        WHERE project_id = ? AND dropped_at IS NULL
@@ -130,6 +135,7 @@ export function upsertSampleGroup(
     project_id: string;
     policy_id: string;
     model_id: string;
+    candidate_id?: string | null;
     why: string;
     input_redacted: string;
     output_redacted: string;
@@ -156,14 +162,15 @@ export function upsertSampleGroup(
   const groupId = newSampleGroupId();
   db.prepare(
     `INSERT INTO sample_groups (
-       id, project_id, policy_id, model_id, why, fingerprint, state,
-       sample_count, exemplar_sample_id, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, 'new', 1, ?, ?, ?)`,
+       id, project_id, policy_id, model_id, candidate_id, why, fingerprint,
+       state, sample_count, exemplar_sample_id, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'new', 1, ?, ?, ?)`,
   ).run(
     groupId,
     row.project_id,
     row.policy_id,
     row.model_id,
+    row.candidate_id ?? null,
     row.why,
     fingerprint,
     row.id,
@@ -179,8 +186,8 @@ export function listSampleGroups(
 ): SampleGroupRow[] {
   return db
     .prepare(
-      `SELECT id, project_id, policy_id, model_id, why, fingerprint, state,
-              sample_count, exemplar_sample_id, created_at, updated_at
+      `SELECT id, project_id, policy_id, model_id, candidate_id, why,
+              fingerprint, state, sample_count, exemplar_sample_id, created_at, updated_at
        FROM sample_groups
        WHERE project_id = ?
        ORDER BY updated_at ASC, id ASC`,

@@ -196,6 +196,20 @@ export function suiteNotFoundError(evalSetId: string): AgentError {
   });
 }
 
+/** The key scope does not allow this call. */
+export function scopeForbiddenError(
+  message = "This key cannot do this call. Use a full key.",
+): AgentError {
+  return agentError({
+    code: ErrorCode.SCOPE_FORBIDDEN,
+    message,
+    retryable: false,
+    suggested_tool: null,
+    suggested_args: {},
+    next_action: { tool: null, args: {}, ask_human: null },
+  });
+}
+
 export function needMoreEvalsError(
   projectId: string,
   evalSetId: string,

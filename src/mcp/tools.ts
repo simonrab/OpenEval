@@ -23,13 +23,26 @@ const MCP_DESCRIPTIONS: Record<ToolName, string> = {
     "Name the cheapest fast model that still passes. Show approve_url and stop.",
   register_failure: "Add a failure as a new eval on a new eval-set version.",
   get_eval_report: "Return a short eval run report that fits in context.",
-  compile_policy: "Compile rec_ and ste_ into a pol_. This tool does not send live traffic.",
+  compile_policy:
+    "Compile rec_ and ste_ into a pol_. The pol_ keeps the whole setup: model, settings, and system prompt. This tool does not send live traffic.",
   get_live_report: "Return live counts, last-known age, and paginated sample ids.",
   promote_live_sample: "Turn a live sample into a v0 failure.",
   propose_rollout: "Propose canary, full, or rollback. This tool does not apply.",
   configure_live_automation: "Configure guarded live automation rules for one project.",
   run_live_decision_cycle: "Run one guarded live decision cycle for one project.",
   get_decision_cycle_status: "Return the last guarded decision cycle status.",
+  get_training_failures:
+    "Return train evals that a candidate failed, with its outputs. Holdout evals show only as counts.",
+  get_verdict:
+    "Compare a candidate setup with a baseline on train and holdout evals. Return keep, revert, or within_noise. Pass session_id to record the round.",
+  get_eval_inputs:
+    "Return the input of each trusted eval, so your app harness can run them. This tool does not return checks or results.",
+  submit_outputs:
+    "Send the outputs that your app harness made for the eval inputs. OpenEval scores them as one candidate run and returns counts only. Pass keys_ref and max_eval_spend_usd so a calibrated judge grades person evals. Then call get_verdict.",
+  configure_judge:
+    "Set the model judge for person evals in an eval set. The judge does not grade until calibrate_judge shows that it agrees with people. Then call calibrate_judge.",
+  calibrate_judge:
+    "Run the judge on held-out outputs that people marked. The judge is trusted only when it agrees with people. If not, show mark_url and stop.",
 };
 
 function toJsonSchema(name: ToolName): Record<string, unknown> {

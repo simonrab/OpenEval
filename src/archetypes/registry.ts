@@ -35,6 +35,9 @@ export type ScorerPrimitive =
   | "citation_support"
   | "retrieval_contains"
   | "pairwise_equals"
+  | "contains_all"
+  | "contains_any"
+  | "length_range"
   | "run_metric";
 
 export type ArchetypeDefinition = {
@@ -62,6 +65,7 @@ const definitions: ArchetypeDefinition[] = [
       "field_equals",
       "regex_match",
       "must_not_contain",
+      "length_range",
     ],
     humanMarkPath: "Use person mark only when the format rule is ambiguous.",
     examples: ["Output is JSON and has total_cents."],
@@ -131,6 +135,7 @@ const definitions: ArchetypeDefinition[] = [
     scorerPrimitives: [
       "citation_support",
       "retrieval_contains",
+      "contains_all",
       "must_not_contain",
       "fixture",
     ],
@@ -144,7 +149,7 @@ const definitions: ArchetypeDefinition[] = [
     measures: "Citation presence and source support.",
     appliesWhen: "The job must cite sources.",
     requiredEvidence: ["source ids", "source text", "citation format"],
-    scorerPrimitives: ["citation_support", "regex_match", "retrieval_contains"],
+    scorerPrimitives: ["citation_support", "regex_match", "retrieval_contains", "contains_any"],
     humanMarkPath: "Use person mark when support is a domain judgment.",
     examples: ["Each factual claim cites a source id."],
     draftable: true,

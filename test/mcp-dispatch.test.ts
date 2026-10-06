@@ -141,6 +141,40 @@ function validInput(name: (typeof TOOL_NAMES)[number]): Record<string, unknown> 
       };
     case "get_decision_cycle_status":
       return { project_id: "prj_1" };
+    case "get_training_failures":
+      return { project_id: "prj_1", run_id: "run_1", candidate_id: "m/a" };
+    case "get_verdict":
+      return {
+        project_id: "prj_1",
+        baseline_run_id: "run_1",
+        baseline_candidate_id: "m/a",
+        candidate_run_id: "run_2",
+        candidate_id: "m/a#v2",
+      };    case "get_eval_inputs":
+      return { project_id: "prj_1", eval_set_id: "ste_1" };
+    case "submit_outputs":
+      return {
+        project_id: "prj_1",
+        eval_set_id: "ste_1",
+        candidate: { id: "harness#v1" },
+        outputs: [{ eval_id: "evl_1", output: "ok" }],
+        idempotency_key: "idem-mcp-1",
+      };
+    case "configure_judge":
+      return {
+        project_id: "prj_1",
+        eval_set_id: "ste_1",
+        judge_model: "openai/gpt-4.1-mini",
+        idempotency_key: "idem-mcp-1",
+      };
+    case "calibrate_judge":
+      return {
+        project_id: "prj_1",
+        eval_set_id: "ste_1",
+        keys_ref: "pkr_1",
+        max_eval_spend_usd: 1,
+        idempotency_key: "idem-mcp-1",
+      };
   }
 }
 
@@ -180,7 +214,7 @@ describe("MCP tool registry", () => {
   });
 
   it("registers v0, Live v1, and V2 tools with non-empty schemas", () => {
-    assert.equal(MCP_TOOLS.length, 14);
+    assert.equal(MCP_TOOLS.length, 20);
     const v0 = [
       "generate_eval_suite",
       "queue_for_labeling",
@@ -200,6 +234,12 @@ describe("MCP tool registry", () => {
     assert.ok(MCP_TOOLS.find((t) => t.name === "configure_live_automation"));
     assert.ok(MCP_TOOLS.find((t) => t.name === "run_live_decision_cycle"));
     assert.ok(MCP_TOOLS.find((t) => t.name === "get_decision_cycle_status"));
+    assert.ok(MCP_TOOLS.find((t) => t.name === "get_training_failures"));
+    assert.ok(MCP_TOOLS.find((t) => t.name === "get_verdict"));
+    assert.ok(MCP_TOOLS.find((t) => t.name === "get_eval_inputs"));
+    assert.ok(MCP_TOOLS.find((t) => t.name === "submit_outputs"));
+    assert.ok(MCP_TOOLS.find((t) => t.name === "configure_judge"));
+    assert.ok(MCP_TOOLS.find((t) => t.name === "calibrate_judge"));
     for (const name of TOOL_NAMES) {
       const tool = MCP_TOOLS.find((t) => t.name === name);
       assert.ok(tool, `missing MCP tool ${name}`);
@@ -245,8 +285,8 @@ describe("MCP HTTP client auth", () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-mcp-auth-"));
-    app = await createTestApp(join(dir, "evalrouter.sqlite"));
+    dir = mkdtempSync(join(tmpdir(), "openeval-mcp-auth-"));
+    app = await createTestApp(join(dir, "openeval.sqlite"));
   });
 
   afterEach(async () => {
@@ -254,7 +294,7 @@ describe("MCP HTTP client auth", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("sends Bearer auth from EVALROUTER_KEY", async () => {
+  it("sends Bearer auth from OPENEVAL_KEY", async () => {
     let seenAuth: string | undefined;
     const fetchSpy: typeof fetch = async (_input, init) => {
       const headers = init?.headers;
@@ -303,8 +343,8 @@ describe("MCP round-trip vs HTTP", () => {
   let keysRef: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-mcp-roundtrip-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-mcp-roundtrip-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await createTestApp(sqlitePath);
 
     const proj = await app.inject({
@@ -451,8 +491,8 @@ describe("MCP unknown tools", () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-mcp-envelope-"));
-    app = await createTestApp(join(dir, "evalrouter.sqlite"));
+    dir = mkdtempSync(join(tmpdir(), "openeval-mcp-envelope-"));
+    app = await createTestApp(join(dir, "openeval.sqlite"));
   });
 
   afterEach(async () => {

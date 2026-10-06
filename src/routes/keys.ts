@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type Database from "better-sqlite3";
 import { z } from "zod";
+import { mintOptimizerKey } from "../auth.js";
 import { agentError, projectNotFoundError } from "../errors.js";
 import {
   deriveWrapKey,
@@ -15,6 +16,13 @@ const createKeyBodySchema = z
     project_id: z.string().min(1),
     secret: z.string().min(1),
     provider: z.string().min(1).nullable().optional(),
+  })
+  .strict();
+
+const mintKeyBodySchema = z
+  .object({
+    project_id: z.string().min(1),
+    scope: z.literal("optimizer"),
   })
   .strict();
 
@@ -37,6 +45,24 @@ export async function registerKeys(
   const wrapKey = deriveWrapKey(apiKey);
 
   app.post("/keys", async (request, reply) => {
+    const raw = request.body as Record<string, unknown> | null;
+    if (raw && typeof raw === "object" && "scope" in raw) {
+      const mint = mintKeyBodySchema.safeParse(raw);
+      if (!mint.success) {
+        return reply
+          .code(400)
+          .send(invalidKeyInput("Pass project_id and scope optimizer. Do not pass secret."));
+      }
+      if (!projectExists(db, mint.data.project_id)) {
+        return reply.code(404).send(projectNotFoundError(mint.data.project_id));
+      }
+      return {
+        api_key: mintOptimizerKey(db, mint.data.project_id),
+        scope: "optimizer",
+        project_id: mint.data.project_id,
+      };
+    }
+
     const parsed = createKeyBodySchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send(invalidKeyInput("invalid keys body"));

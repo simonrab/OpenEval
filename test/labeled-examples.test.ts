@@ -90,8 +90,8 @@ describe("labeled examples", () => {
   let sqlitePath: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-labeled-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-labeled-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await buildApp({ sqlitePath, apiKey: TEST_API_KEY });
   });
 
@@ -253,8 +253,8 @@ describe("labeled example scoring uses system prompt plus example text", () => {
   let captured: Array<{ prompt: string; systemPrompt?: string }>;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-labeled-run-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-labeled-run-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     captured = [];
     app = await buildApp({
       sqlitePath,
@@ -309,6 +309,7 @@ describe("labeled example scoring uses system prompt plus example text", () => {
         project_id: suite.project_id,
         eval_set_id: suite.eval_set_id,
         models: ["openai/gpt-4.1-nano"],
+        reps: 1,
         max_eval_spend_usd: 1,
         keys_ref: keysRef,
         idempotency_key: "idem-run-labeled",

@@ -199,10 +199,54 @@ function trustEval(
   db: Database.Database,
   evalId: string,
   trustedMark: MarkPayload,
+  judgedOutput: string | null,
 ): void {
   db.prepare(
-    `UPDATE evals SET status = 'trusted', trusted_mark = ? WHERE id = ?`,
-  ).run(JSON.stringify(normalizeMarkPayload(trustedMark)), evalId);
+    `UPDATE evals SET status = 'trusted', trusted_mark = ?, trusted_output = ? WHERE id = ?`,
+  ).run(JSON.stringify(normalizeMarkPayload(trustedMark)), judgedOutput, evalId);
+}
+
+/** The output that the mark screen shows next to the input, if any. */
+export function getMarkOutput(db: Database.Database, evalId: string): string | null {
+  const row = db.prepare(`SELECT mark_output FROM evals WHERE id = ?`).get(evalId) as
+    | { mark_output: string | null }
+    | undefined;
+  return row?.mark_output ?? null;
+}
+
+/** Show this output on the mark screen. People then mark the output, not only the input. */
+export function setMarkOutputs(
+  db: Database.Database,
+  evalSetId: string,
+  outputs: Array<{ eval_id: string; output: string }>,
+): number {
+  const update = db.prepare(
+    `UPDATE evals SET mark_output = ?
+     WHERE id = ? AND score_how = 'person' AND status != 'trusted'
+       AND id IN (SELECT eval_id FROM eval_set_members WHERE eval_set_id = ?)
+       AND NOT EXISTS (SELECT 1 FROM marks WHERE marks.eval_id = evals.id)`,
+  );
+  let n = 0;
+  db.transaction(() => {
+    for (const o of outputs) {
+      n += update.run(o.output, o.eval_id, evalSetId).changes;
+    }
+  })();
+  return n;
+}
+
+function judgedOutputOf(
+  db: Database.Database,
+  evalSetId: string,
+  evalId: string,
+  personId: string,
+): string | null {
+  const row = db
+    .prepare(
+      `SELECT judged_output FROM marks WHERE eval_set_id = ? AND eval_id = ? AND person_id = ?`,
+    )
+    .get(evalSetId, evalId, personId) as { judged_output: string | null } | undefined;
+  return row?.judged_output ?? null;
 }
 
 export type SubmitMarkResult =
@@ -263,13 +307,14 @@ export function submitMark(
   const now = new Date().toISOString();
   const tx = db.transaction(() => {
     db.prepare(
-      `INSERT INTO marks (eval_set_id, eval_id, person_id, mark_json, is_third, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO marks (eval_set_id, eval_id, person_id, mark_json, judged_output, is_third, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       input.evalSetId,
       input.evalId,
       input.personId,
       JSON.stringify(input.mark),
+      getMarkOutput(db, input.evalId),
       input.isThird ? 1 : 0,
       now,
     );
@@ -282,7 +327,12 @@ export function submitMark(
     const payload = input.mark as MarkPayload;
 
     if (input.isThird) {
-      trustEval(db, input.evalId, payload);
+      trustEval(
+        db,
+        input.evalId,
+        payload,
+        judgedOutputOf(db, input.evalSetId, input.evalId, input.personId),
+      );
       setQueueState(db, input.evalSetId, input.evalId, "trusted");
       return;
     }
@@ -316,7 +366,10 @@ export function submitMark(
         }
         const agreement = marksAgree(a, b, spec);
         if (agreement.agree) {
-          trustEval(db, input.evalId, a);
+          // Both people must have seen the same output for it to count.
+          const outA = judgedOutputOf(db, input.evalSetId, input.evalId, regularMarks[0]!.person_id);
+          const outB = judgedOutputOf(db, input.evalSetId, input.evalId, regularMarks[1]!.person_id);
+          trustEval(db, input.evalId, a, outA != null && outA === outB ? outA : null);
           setQueueState(db, input.evalSetId, input.evalId, "trusted");
         } else {
           setQueueState(db, input.evalSetId, input.evalId, "disagree");

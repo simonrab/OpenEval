@@ -1,3 +1,4 @@
+import type { AuthScope } from "./auth.js";
 import { agentError } from "./errors.js";
 import { handleCompilePolicy } from "./tools/compile_policy.js";
 import { handleGetLiveReport } from "./tools/get_live_report.js";
@@ -11,6 +12,13 @@ import {
 import { handleGenerateEvalSuite } from "./tools/generate_eval_suite.js";
 import { handleGetEvalReport } from "./tools/get_eval_report.js";
 import { handleGetLabelStatus } from "./tools/get_label_status.js";
+import { handleGetTrainingFailures } from "./tools/get_training_failures.js";
+import { handleGetVerdict } from "./tools/get_verdict.js";
+import { handleGetEvalInputs } from "./tools/get_eval_inputs.js";
+import { handleSubmitOutputs } from "./tools/submit_outputs.js";
+import { handleConfigureJudge } from "./tools/configure_judge.js";
+import { handleCalibrateJudge } from "./tools/calibrate_judge.js";
+import { checkScope, redactForScope } from "./tools/scope.js";
 import { handleQueueForLabeling } from "./tools/queue_for_labeling.js";
 import { handleRecommendModels } from "./tools/recommend_models.js";
 import { handleRegisterFailure } from "./tools/register_failure.js";
@@ -27,6 +35,8 @@ export type ToolContext = {
   apiKey?: string;
   baseUrl?: string;
   openRouter?: OpenRouterClient;
+  /** Missing means full scope (in-process callers and the server key). */
+  scope?: AuthScope;
 };
 
 export type DispatchResult = {
@@ -62,6 +72,12 @@ handlers.set("propose_rollout", handleProposeRollout);
 handlers.set("configure_live_automation", handleConfigureLiveAutomation);
 handlers.set("run_live_decision_cycle", handleRunLiveDecisionCycle);
 handlers.set("get_decision_cycle_status", handleGetDecisionCycleStatus);
+handlers.set("get_training_failures", handleGetTrainingFailures);
+handlers.set("get_verdict", handleGetVerdict);
+handlers.set("get_eval_inputs", handleGetEvalInputs);
+handlers.set("submit_outputs", handleSubmitOutputs);
+handlers.set("configure_judge", handleConfigureJudge);
+handlers.set("calibrate_judge", handleCalibrateJudge);
 
 function unknownToolError() {
   return agentError({
@@ -83,14 +99,24 @@ export async function dispatch(
     return { status: 404, body: unknownToolError() };
   }
 
+  const toolDenied = checkScope(ctx, name, null);
+  if (toolDenied) {
+    return toolDenied;
+  }
+
   const parsed = parseToolInput(name, body);
   if (!parsed.ok) {
     return { status: 400, body: parsed.error };
+  }
+
+  const inputDenied = checkScope(ctx, name, parsed.data);
+  if (inputDenied) {
+    return inputDenied;
   }
 
   const handler = handlers.get(name);
   if (!handler) {
     return { status: 501, body: notBuiltError(name) };
   }
-  return handler(parsed.data, ctx);
+  return redactForScope(ctx, await handler(parsed.data, ctx));
 }

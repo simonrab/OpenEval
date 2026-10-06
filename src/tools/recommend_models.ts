@@ -11,7 +11,10 @@ import { getJobLimits } from "../job.js";
 import { deriveWrapKey, projectExists, readSecret } from "../keys.js";
 import { buildApproveUrl, signApproveToken } from "../routes/approve.js";
 import { buildReportUrl } from "../report-token.js";
-import { getRun, listRunResults } from "../runner/queue.js";
+import { getRun, listRunResults, OPTIMIZE_INTENT } from "../runner/queue.js";
+import { runCandidates } from "../runner/candidates.js";
+import { countPersonEvalsNotGraded } from "../runner/score.js";
+import { graderAdvice } from "../judge/advice.js";
 import { hasEnoughTrustedEvals } from "../runner/worker.js";
 import { getOldTrustedEvalIds } from "../eval-set-copy.js";
 import { resolveMarkUrlForSet } from "./get_label_status.js";
@@ -71,17 +74,21 @@ function storeRecommendation(
     intent: string;
     namedModelId: string | null;
     backups: string[];
-    quality: { n_pass: number; n_fail: number };
+    quality: { n_pass: number; n_fail: number } & Record<string, unknown>;
     timeMs: { p50: number; p95: number };
     costUsd: number;
     failingEvalIds: string[];
+    candidateJson?: string | null;
+    backupCandidatesJson?: string | null;
+    costSource?: string | null;
   },
 ): void {
   db.prepare(
     `INSERT INTO recommendations
       (id, project_id, eval_set_id, run_id, intent, named_model_id,
-       backup_model_ids, quality_json, time_json, cost_usd, failing_eval_ids, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       backup_model_ids, quality_json, time_json, cost_usd, failing_eval_ids, created_at,
+       candidate_json, backup_candidates_json, cost_source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.recId,
     input.projectId,
@@ -95,6 +102,9 @@ function storeRecommendation(
     input.costUsd,
     JSON.stringify(input.failingEvalIds),
     new Date().toISOString(),
+    input.candidateJson ?? null,
+    input.backupCandidatesJson ?? null,
+    input.costSource ?? null,
   );
 }
 
@@ -191,6 +201,25 @@ export const handleRecommendModels: ToolHandler = async (body, ctx) => {
     };
   }
 
+  if (run.intent === OPTIMIZE_INTENT) {
+    return {
+      status: 400,
+      body: agentError({
+        code: ErrorCode.INVALID_INPUT,
+        message:
+          "This run scores outputs from an app harness. Use a run from run_evals to name a model.",
+        retryable: false,
+        suggested_tool: "run_evals",
+        suggested_args: { project_id: input.project_id, eval_set_id: input.eval_set_id },
+        next_action: {
+          tool: "run_evals",
+          args: { project_id: input.project_id, eval_set_id: input.eval_set_id },
+          ask_human: null,
+        },
+      }),
+    };
+  }
+
   if (run.status === "queued" || run.status === "running") {
     return {
       status: 400,
@@ -244,12 +273,17 @@ export const handleRecommendModels: ToolHandler = async (body, ctx) => {
   const trusted = members.filter((m) => m.status === "trusted");
   const trustedEvalIds = trusted.map((m) => m.eval_id);
   const rawResults = listRunResults(db, input.run_id);
+  const nNotGraded = countPersonEvalsNotGraded(rawResults);
   const results = rawResults.map((r) => ({
     model_id: r.model_id,
     eval_id: r.eval_id,
     passed: r.passed === 1,
     time_ms: r.time_ms,
     cost_usd: r.cost_usd,
+    outcome: r.outcome,
+    prompt_tokens: r.prompt_tokens,
+    completion_tokens: r.completion_tokens,
+    cost_source: r.cost_source,
   }));
 
   const limits = getJobLimits(db, input.eval_set_id);
@@ -326,11 +360,25 @@ export const handleRecommendModels: ToolHandler = async (body, ctx) => {
     return { status: 400, body: err };
   }
 
-  const winnerRows = results.filter((r) => r.model_id === picked.winner);
-  const nPass = winnerRows.filter((r) => r.passed).length;
-  const nFail = winnerRows.length - nPass;
+  const winnerRows = results.filter(
+    (r) => r.model_id === picked.winner && r.outcome !== "error",
+  );
   const winnerTimes = winnerRows.map((r) => r.time_ms);
   const winnerCost = winnerRows.reduce((sum, r) => sum + r.cost_usd, 0);
+  const winnerStats = picked.winnerStats;
+  const runSetups = run.candidates ? runCandidates(run.models, run.candidates) : [];
+  const winnerCandidate = runSetups.find((c) => c.id === picked.winner) ?? null;
+  const backupCandidates = picked.backups
+    .map((id) => runSetups.find((c) => c.id === id))
+    .filter((c) => c !== undefined);
+  const quality = {
+    n_pass: winnerStats.nPass,
+    n_fail: winnerStats.nFail,
+    n_trials: winnerStats.nTrials,
+    pass_rate: winnerStats.passRate,
+    pass_rate_ci95: [winnerStats.passRateLow, winnerStats.passRateHigh] as [number, number],
+    flaky_eval_ids: winnerStats.flakyEvalIds,
+  };
 
   storeRecommendation(db, {
     recId,
@@ -340,7 +388,11 @@ export const handleRecommendModels: ToolHandler = async (body, ctx) => {
     intent: input.intent,
     namedModelId: picked.winner,
     backups: picked.backups,
-    quality: { n_pass: nPass, n_fail: nFail },
+    quality,
+    candidateJson: winnerCandidate ? JSON.stringify(winnerCandidate) : null,
+    backupCandidatesJson:
+      backupCandidates.length > 0 ? JSON.stringify(backupCandidates) : null,
+    costSource: winnerStats.costSource,
     timeMs: {
       p50: percentile(winnerTimes, 50),
       p95: percentile(winnerTimes, 95),
@@ -359,14 +411,18 @@ export const handleRecommendModels: ToolHandler = async (body, ctx) => {
     named_model: {
       id: picked.winner,
       backups: picked.backups,
+      ...(winnerCandidate ? { candidate: winnerCandidate } : {}),
     },
     failing_eval_ids: [],
-    quality: { n_pass: nPass, n_fail: nFail },
+    quality,
     time_ms: {
       p50: percentile(winnerTimes, 50),
       p95: percentile(winnerTimes, 95),
     },
     cost_usd: winnerCost,
+    cost_source: winnerStats.costSource as "provider" | "estimate" | "caller" | "mixed",
+    n_person_evals_not_graded: nNotGraded,
+    grader_advice: graderAdvice(db, input.eval_set_id, nNotGraded),
     report_url: buildReportUrl(baseUrl, ctx.apiKey ?? "", {
       project_id: input.project_id,
       run_id: input.run_id,

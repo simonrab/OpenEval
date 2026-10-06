@@ -71,8 +71,8 @@ describe("dispatch registry", () => {
   });
 
   it("returns an error envelope for run_evals without a valid project", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "evalrouter-dispatch-"));
-    const db = openDb(join(dir, "evalrouter.sqlite"));
+    const dir = mkdtempSync(join(tmpdir(), "openeval-dispatch-"));
+    const db = openDb(join(dir, "openeval.sqlite"));
     try {
       const result = await dispatch(
         "run_evals",
@@ -122,9 +122,9 @@ describe("POST /v1/tools/:name", () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-tools-"));
+    dir = mkdtempSync(join(tmpdir(), "openeval-tools-"));
     app = await buildApp({
-      sqlitePath: join(dir, "evalrouter.sqlite"),
+      sqlitePath: join(dir, "openeval.sqlite"),
       apiKey,
     });
   });

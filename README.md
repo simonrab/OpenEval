@@ -1,20 +1,29 @@
-# EvalRouter
+# OpenEval
 
-EvalRouter helps an AI coding agent choose a model for one AI feature.
+OpenEval helps an AI coding agent choose a model for one AI feature.
 
 It is an agent tool and an HTTP API.
 The agent calls it with repo context, prompts, schemas, examples, failures, and notes.
-EvalRouter makes draft evals from that evidence.
+OpenEval makes draft evals from that evidence.
 It runs trusted evals against models.
 It recommends one named model for the app.
 
-EvalRouter can also serve a live signed policy.
+OpenEval can also serve a live signed policy.
 The app uses that policy through the SDK or optional proxy.
 A deployed control job can update that policy in guarded mode.
 
+The repository has two tools:
+
+- **OpenEval** is the referee. It names the cheapest fast setup that passes your trusted evals.
+  A setup is a model, its settings, and an optional system prompt.
+- **openeval-tune** is the player. It changes one thing in each round on a branch:
+  the prompt, the tool descriptions, the harness code, or the settings.
+  OpenEval scores each change on held-out evals that openeval-tune cannot see.
+  See [packages/openeval-tune](packages/openeval-tune/README.md).
+
 ## Who it is for
 
-EvalRouter is for teams that add AI features to real products.
+OpenEval is for teams that add AI features to real products.
 
 It is useful when:
 
@@ -27,7 +36,7 @@ It is useful when:
 It is not an eval dashboard.
 It is not a prompt rewrite system.
 It is not a learned per-request picker.
-It does not trust a model-only judge.
+It does not trust a model judge until the judge agrees with human marks.
 
 ## Main idea
 
@@ -37,7 +46,7 @@ A score says if the model did the job.
 
 An **archetype** is an eval pattern.
 It tells the agent what evidence to give.
-It tells EvalRouter which scorer primitive can apply.
+It tells OpenEval which scorer primitive can apply.
 
 A **scorer primitive** is a small program check.
 It returns pass or fail for one model output.
@@ -105,7 +114,7 @@ The input can include:
 - `custom_archetypes`
 - `evidence`
 
-EvalRouter selects archetypes from explicit ids first.
+OpenEval selects archetypes from explicit ids first.
 Then it uses evidence and description.
 It uses schemas and labels before keyword guesses.
 It returns `JOB_UNCLEAR` when it cannot draft a useful eval.
@@ -116,7 +125,18 @@ A deterministic program check can become trusted after accept.
 A person eval needs marks.
 A model-only check never becomes trusted.
 
-EvalRouter stores eval-set versions.
+Program checks include `json_schema`, `regex_match`, `numeric_close`, `set_equals`,
+`contains_all`, `contains_any`, `length_range`, `tool_args`, `trace_rule`,
+`citation_support`, `retrieval_contains`, and `pairwise_equals`.
+
+A person eval can use a model judge for new outputs.
+Call `configure_judge`, then `calibrate_judge`.
+The judge becomes trusted only when it agrees with human marks on held-out examples:
+20 or more examples, 85 percent accuracy or more, and a kappa of 0.6 or more.
+New human marks make the judge stale. Calibrate it again.
+Without a trusted judge, a person eval on a new output shows as "not graded". It does not pass in silence.
+
+OpenEval stores eval-set versions.
 New work can copy old evals forward.
 A registered failure can become a new eval.
 
@@ -124,15 +144,26 @@ A registered failure can become a new eval.
 
 Call `run_evals`.
 
-EvalRouter runs trusted evals under a spend cap.
+OpenEval runs trusted evals under a spend cap.
 It scores code evals with scorer primitives or fixtures.
 It reuses person marks from the eval-set version.
+
+Pass `models` (model ids) or `candidates`.
+A candidate is `{ id, model, settings?, system_prompt? }`. The id is the model id or `model#label`.
+
+Each eval runs 3 times per candidate by default (`reps`, 1 to 10).
+An eval passes only when every scored rep passes.
+The report shows a pass rate with a 95 percent range and the flaky evals.
+A recheck uses the reps of the run that named the model, so the scoring stays the same.
+
+Cost is the real cost from the provider, with token counts.
+A failed call is retried. A call that still fails is an error. It is not a model fail.
 
 ### 4. Recommend a model
 
 Call `recommend_models`.
 
-EvalRouter applies hard limits.
+OpenEval applies hard limits.
 It ranks models that pass all trusted evals.
 It chooses the cheapest fast passing model.
 A costlier or slower model wins only with clear quality lift.
@@ -141,7 +172,7 @@ A costlier or slower model wins only with clear quality lift.
 
 Call `compile_policy`.
 
-EvalRouter creates a signed policy from the recommendation.
+OpenEval creates a signed policy from the recommendation.
 Approval controls when live traffic can use that policy.
 The app reads the policy through the SDK or optional proxy.
 
@@ -157,6 +188,36 @@ It can roll back to the last full policy.
 
 Rollback has priority over promotion.
 Manual mode never changes live policy.
+
+The policy holds the full winning setup for the primary and each backup:
+the base model, the settings, and the system prompt.
+The SDK and proxy send the base model id with those settings.
+The system prompt is sent only when the app opts in:
+`applyPolicySystemPrompt: true` in the SDK, or the header `x-openeval-apply-system-prompt: true` on the proxy.
+A recommendation from app harness outputs cannot become a live policy.
+
+### 7. Tune a feature with openeval-tune
+
+openeval-tune runs a hill-climb loop against OpenEval.
+
+Each eval set has a stable hidden held-out split.
+These tools support the loop:
+
+- `get_eval_inputs` returns the eval inputs, so your own harness can make the outputs.
+- `submit_outputs` scores those outputs. Use it for prompt, tool, and harness changes.
+- `get_training_failures` shows failures on the training split only.
+- `get_verdict` compares a candidate with the baseline.
+  It returns `keep`, `revert_overfit`, `revert_regressed`, `within_noise`, or `not_comparable`.
+  It reports a plateau after 3 rounds with no gain.
+
+The loop uses an **optimizer key** (`oeo_...`).
+A person with a full key mints it: `POST /v1/keys {"project_id":"prj_...","scope":"optimizer"}`.
+The server limits that key to the six tools above.
+Every response hides the held-out evals.
+The key cannot configure or calibrate the judge, and it cannot change live policy.
+
+`openeval-tune promote` can ship a winning direct setup through Live.
+It needs a full key, and a person approves each gate.
 
 ## Built-in archetypes
 
@@ -184,17 +245,18 @@ The coding agent must pass its definition in `custom_archetypes`.
 ## How to run locally
 
 Use Node.js 22 or newer.
+The repository includes `.nvmrc`.
 
 ```bash
 npm ci
-EVALROUTER_KEY=replace-with-a-local-secret npm start
+OPENEVAL_KEY=replace-with-a-local-secret npm start
 ```
 
 Optional environment variables:
 
 ```bash
-EVALROUTER_SQLITE=./evalrouter.sqlite
-EVALROUTER_BASE_URL=http://127.0.0.1:3000
+OPENEVAL_SQLITE=./openeval.sqlite
+OPENEVAL_BASE_URL=http://127.0.0.1:3000
 PORT=3000
 ```
 
@@ -202,7 +264,14 @@ Run checks:
 
 ```bash
 npm test
+npm run test:tune
 npm run build
+```
+
+If `better-sqlite3` reports a Node.js module version mismatch, rebuild it.
+
+```bash
+npm rebuild better-sqlite3
 ```
 
 ## How to use with an agent
@@ -261,22 +330,35 @@ The agent must follow `next_action`.
 
 ## Safety boundaries
 
-EvalRouter does not secretly author trusted evals.
+OpenEval does not secretly author trusted evals.
 The coding agent drafts evals from evidence.
 A person accepts or marks the evals.
 
-EvalRouter does not sit in front of live traffic by default.
+OpenEval does not sit in front of live traffic by default.
 The SDK path is the default live path.
 The optional proxy uses the same signed policy engine.
 
-EvalRouter does not run evals on a live user request.
+OpenEval does not run evals on a live user request.
 Live samples are redacted before storage.
+
+The optimizer never sees held-out evals and never grades itself.
+The server enforces this, not the optimizer.
 
 ## Why use it
 
-EvalRouter makes model choice evidence-based.
+OpenEval makes model choice evidence-based.
 It reduces brittle eval generation.
 It keeps subjective judgment with people.
 It keeps live model changes inside guard rules.
 It gives the app one named model or one signed policy.
 It gives the team a report that fits in agent context.
+
+## Contribute
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request.
+Report suspected vulnerabilities with [SECURITY.md](SECURITY.md).
+
+## License
+
+OpenEval uses the Apache License 2.0.
+See [LICENSE](LICENSE) and [NOTICE](NOTICE).

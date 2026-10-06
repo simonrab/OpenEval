@@ -34,7 +34,7 @@ type KeyRow = {
 };
 
 /**
- * Derive the AES wrap key from EVALROUTER_KEY (the server Bearer secret).
+ * Derive the AES wrap key from OPENEVAL_KEY (the server Bearer secret).
  * The wrap key is never stored in SQLite.
  */
 export function deriveWrapKey(apiKey: string): Buffer {

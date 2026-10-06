@@ -18,7 +18,10 @@ export type ProgramCheck = {
     | "trace_rule"
     | "citation_support"
     | "retrieval_contains"
-    | "pairwise_equals";
+    | "pairwise_equals"
+    | "contains_all"
+    | "contains_any"
+    | "length_range";
   expected: unknown;
 };
 

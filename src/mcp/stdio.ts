@@ -11,13 +11,13 @@ if (existsSync(envPath)) {
 }
 
 async function main(): Promise<void> {
-  const apiKey = process.env.EVALROUTER_KEY;
+  const apiKey = process.env.OPENEVAL_KEY;
   if (!apiKey) {
-    console.error("EVALROUTER_KEY is required");
+    console.error("OPENEVAL_KEY is required");
     process.exit(1);
   }
 
-  const baseUrl = process.env.EVALROUTER_URL ?? "http://127.0.0.1:3000";
+  const baseUrl = process.env.OPENEVAL_URL ?? "http://127.0.0.1:3000";
   const server = createMcpServer({ baseUrl, apiKey });
   const transport = new StdioServerTransport();
   await server.connect(transport);

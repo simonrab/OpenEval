@@ -12,10 +12,10 @@ import {
 } from "../src/policy.js";
 import { ErrorCode } from "../src/tools/types.js";
 
-const evalrouterKey = "evalrouter-seal-key-not-a-secret";
+const openevalKey = "openeval-seal-key-not-a-secret";
 const vendorKey = "sk-or-v1-app-vendor-key";
 const projectId = "prj_live_sdk";
-const evalrouterUrl = "http://127.0.0.1:3000";
+const openevalUrl = "http://127.0.0.1:3000";
 const primaryModel = "openai/gpt-4.1-nano";
 const backupModel = "anthropic/claude-haiku-4.5";
 const otherModel = "openai/gpt-4.1";
@@ -37,7 +37,7 @@ function sampleUnsigned(extra?: Partial<UnsignedPolicy>): UnsignedPolicy {
 }
 
 function signedPolicy(extra?: Partial<UnsignedPolicy>): SignedPolicy {
-  return signPolicy(evalrouterKey, sampleUnsigned(extra));
+  return signPolicy(openevalKey, sampleUnsigned(extra));
 }
 
 type FetchCall = {
@@ -125,7 +125,7 @@ describe("Live SDK hop", () => {
   let sdk: ReturnType<typeof createLiveSdk>;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-live-sdk-"));
+    dir = mkdtempSync(join(tmpdir(), "openeval-live-sdk-"));
     lastKnownPath = join(dir, "last-known.json");
     calls = [];
     policyReply = () =>
@@ -152,8 +152,8 @@ describe("Live SDK hop", () => {
 
     sdk = createLiveSdk({
       projectId,
-      evalrouterUrl,
-      evalrouterKey,
+      openevalUrl,
+      openevalKey,
       vendorKey,
       lastKnownPath,
       pollMs: 30_000,
@@ -190,15 +190,15 @@ describe("Live SDK hop", () => {
     assert.equal(gets.length, 1);
     assert.equal(
       gets[0].url,
-      `${evalrouterUrl}/v1/runtime/policies/${projectId}`,
+      `${openevalUrl}/v1/runtime/policies/${projectId}`,
     );
-    assert.equal(gets[0].authorization, `Bearer ${evalrouterKey}`);
+    assert.equal(gets[0].authorization, `Bearer ${openevalKey}`);
 
     const posts = openRouterPosts();
     assert.equal(posts.length, 1);
     assert.equal(posts[0].url, "https://openrouter.ai/api/v1/chat/completions");
     assert.equal(posts[0].authorization, `Bearer ${vendorKey}`);
-    assert.notEqual(posts[0].authorization, `Bearer ${evalrouterKey}`);
+    assert.notEqual(posts[0].authorization, `Bearer ${openevalKey}`);
     const payload = JSON.parse(posts[0].body ?? "{}") as {
       model: string;
       messages: Array<{ role: string; content: string }>;
@@ -207,7 +207,7 @@ describe("Live SDK hop", () => {
     assert.notEqual(payload.model, backupModel);
 
     const saved = JSON.parse(readFileSync(lastKnownPath, "utf8")) as SignedPolicy;
-    assert.equal(verifyPolicy(evalrouterKey, saved), true);
+    assert.equal(verifyPolicy(openevalKey, saved), true);
     assert.equal(saved.primary.model_id, primaryModel);
   });
 
@@ -240,7 +240,7 @@ describe("Live SDK hop", () => {
       ...good,
       primary: { model_id: otherModel, timeout_ms: 2500 },
     };
-    assert.equal(verifyPolicy(evalrouterKey, tampered), false);
+    assert.equal(verifyPolicy(openevalKey, tampered), false);
     policyReply = () =>
       new Response(JSON.stringify(tampered), {
         status: 200,
@@ -256,7 +256,7 @@ describe("Live SDK hop", () => {
     assert.equal(payload.model, primaryModel);
     const saved = JSON.parse(readFileSync(lastKnownPath, "utf8")) as SignedPolicy;
     assert.equal(saved.primary.model_id, primaryModel);
-    assert.equal(verifyPolicy(evalrouterKey, saved), true);
+    assert.equal(verifyPolicy(openevalKey, saved), true);
   });
 
   it("start() with an empty file and GET 404 fails; complete must not send", async () => {

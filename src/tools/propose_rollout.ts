@@ -7,8 +7,11 @@ import {
 import { projectExists } from "../keys.js";
 import {
   getApprovedDraftPolicyId,
+  getPolicyRow,
   getProjectLiveState,
+  type SignedPolicy,
 } from "../policy.js";
+import { entryCandidateId } from "../live/request.js";
 import { insertLiveRollout } from "../rollouts.js";
 import {
   buildRolloutApproveUrl,
@@ -112,6 +115,19 @@ export const handleProposeRollout: ToolHandler = (body, ctx) => {
   );
 };
 
+/** The primary setup id of a policy, so the agent sees which setups switch. */
+function setupId(db: Database.Database, policyId: string | null): string | null {
+  const row = policyId ? getPolicyRow(db, policyId) : null;
+  if (!row) {
+    return null;
+  }
+  try {
+    return entryCandidateId((JSON.parse(row.body_json) as SignedPolicy).primary);
+  } catch {
+    return null;
+  }
+}
+
 function storePropose(
   db: Database.Database,
   apiKey: string,
@@ -135,6 +151,8 @@ function storePropose(
   const output = proposeRolloutOutputSchema.parse({
     rollout_id: rollout.id,
     approve_url: approveUrl,
+    from_candidate_id: setupId(db, pointers.old_policy_id),
+    to_candidate_id: setupId(db, pointers.new_policy_id),
     live_traffic_changed: false,
     next_action: {
       tool: null,

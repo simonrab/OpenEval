@@ -14,13 +14,13 @@ import { INPUT_TRUNCATE } from "../src/eval-set.js";
 import { signPolicy, type SignedPolicy, type UnsignedPolicy } from "../src/policy.js";
 import { ErrorCode } from "../src/tools/types.js";
 
-const evalrouterKey = "evalrouter-seal-key-not-a-secret";
+const openevalKey = "openeval-seal-key-not-a-secret";
 const vendorKey = "sk-or-v1-app-vendor-key";
 const projectId = "prj_live_sdk_l4";
-const evalrouterUrl = "http://127.0.0.1:3000";
+const openevalUrl = "http://127.0.0.1:3000";
 const primaryModel = "openai/gpt-4.1-nano";
 const backupModel = "anthropic/claude-haiku-4.5";
-const ingestUrl = `${evalrouterUrl}/v1/runtime/samples`;
+const ingestUrl = `${openevalUrl}/v1/runtime/samples`;
 
 function sampleUnsigned(extra?: Partial<UnsignedPolicy>): UnsignedPolicy {
   return {
@@ -39,7 +39,7 @@ function sampleUnsigned(extra?: Partial<UnsignedPolicy>): UnsignedPolicy {
 }
 
 function signedPolicy(extra?: Partial<UnsignedPolicy>): SignedPolicy {
-  return signPolicy(evalrouterKey, sampleUnsigned(extra));
+  return signPolicy(openevalKey, sampleUnsigned(extra));
 }
 
 type FetchCall = {
@@ -169,18 +169,18 @@ describe("Live SDK samples R3", () => {
   let policyReply: () => Response | Promise<Response>;
   let vendorReply: (init?: RequestInit) => Response | Promise<Response>;
   let ingestReply: () => Response | Promise<Response>;
-  let evalrouterDown: boolean;
+  let openevalDown: boolean;
   let ingestHold: Promise<void> | null;
   let ingestFinished: boolean;
   let sdk: ReturnType<typeof createLiveSdk>;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-live-sdk-l4-"));
+    dir = mkdtempSync(join(tmpdir(), "openeval-live-sdk-l4-"));
     lastKnownPath = join(dir, "last-known.json");
     spoolPath = join(dir, "spool");
     calls = [];
     ingestPosts = [];
-    evalrouterDown = false;
+    openevalDown = false;
     ingestHold = null;
     ingestFinished = false;
     policyReply = () =>
@@ -203,7 +203,7 @@ describe("Live SDK samples R3", () => {
       if (url.startsWith("https://openrouter.ai/")) {
         return vendorReply(init);
       }
-      if (evalrouterDown) {
+      if (openevalDown) {
         throw new TypeError("fetch failed");
       }
       if (method === "POST" && url === ingestUrl) {
@@ -219,8 +219,8 @@ describe("Live SDK samples R3", () => {
 
     sdk = createLiveSdk({
       projectId,
-      evalrouterUrl,
-      evalrouterKey,
+      openevalUrl,
+      openevalKey,
       vendorKey,
       lastKnownPath,
       spoolPath,
@@ -301,7 +301,7 @@ describe("Live SDK samples R3", () => {
     assert.match(primarySample.sample_id, /^smp_/);
     const backupSample = parseSample(ingestPosts[1].body);
     assert.equal(backupSample.model_id, backupModel);
-    assert.equal(ingestPosts[0].authorization, `Bearer ${evalrouterKey}`);
+    assert.equal(ingestPosts[0].authorization, `Bearer ${openevalKey}`);
     assert.notEqual(ingestPosts[0].authorization, `Bearer ${vendorKey}`);
 
     releaseIngest();
@@ -478,7 +478,7 @@ describe("Live SDK samples R3", () => {
   it("writes a spool file when the control plane is down and drains later", async () => {
     vendorReply = () => new Response("vendor down", { status: 503 });
     await sdk.start();
-    evalrouterDown = true;
+    openevalDown = true;
     await assert.rejects(() => sdk.complete({ prompt: "Spool this miss." }));
     await waitUntil(() => spoolFiles().length === 1, "spool write");
     assert.equal(ingestPosts.length, 0);
@@ -487,7 +487,7 @@ describe("Live SDK samples R3", () => {
     assert.equal(stored.input_redacted.includes("Spool this miss."), true);
     assert.match(stored.sample_id, /^smp_/);
 
-    evalrouterDown = false;
+    openevalDown = false;
     await sdk.start();
     await waitUntil(() => ingestPosts.length === 1, "spool drain");
     await waitUntil(() => spoolFiles().length === 0, "spool empty");
@@ -500,8 +500,8 @@ describe("Live SDK samples R3", () => {
     sdk.stop();
     sdk = createLiveSdk({
       projectId,
-      evalrouterUrl,
-      evalrouterKey,
+      openevalUrl,
+      openevalKey,
       vendorKey,
       lastKnownPath,
       spoolPath,
@@ -519,7 +519,7 @@ describe("Live SDK samples R3", () => {
         if (url.startsWith("https://openrouter.ai/")) {
           return vendorReply(init);
         }
-        if (evalrouterDown) {
+        if (openevalDown) {
           throw new TypeError("fetch failed");
         }
         if (method === "POST" && url === ingestUrl) {
@@ -531,7 +531,7 @@ describe("Live SDK samples R3", () => {
     });
     vendorReply = () => new Response("vendor down", { status: 503 });
     await sdk.start();
-    evalrouterDown = true;
+    openevalDown = true;
     await assert.rejects(() => sdk.complete({ prompt: "First spool." }));
     await waitUntil(() => spoolFiles().length === 1, "first spool");
     await assert.rejects(() => sdk.complete({ prompt: "Second drop." }));

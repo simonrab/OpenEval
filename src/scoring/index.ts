@@ -5,7 +5,10 @@ import { scoreJsonValid } from "./json_valid.js";
 import { scoreMustNotContain } from "./must_not_contain.js";
 import {
   scoreCitationSupport,
+  scoreContainsAll,
+  scoreContainsAny,
   scoreJsonSchema,
+  scoreLengthRange,
   scoreNumericClose,
   scorePairwiseEquals,
   scoreRegexMatch,
@@ -51,6 +54,12 @@ export function scoreProgramCheck(
       return scoreRetrievalContains(output, check.expected);
     case "pairwise_equals":
       return scorePairwiseEquals(output, check.expected);
+    case "contains_all":
+      return scoreContainsAll(output, check.expected);
+    case "contains_any":
+      return scoreContainsAny(output, check.expected);
+    case "length_range":
+      return scoreLengthRange(output, check.expected);
     default:
       return { passed: false, reason_short: "unknown check kind" };
   }

@@ -17,6 +17,7 @@ const statsBodySchema = z
     last_known_loaded_at: z.string().min(1).optional(),
     policy_id: z.string().min(1).nullable().optional(),
     model_id: z.string().min(1).nullable().optional(),
+    candidate_id: z.string().min(1).nullable().optional(),
     feature_id: z.string().min(1).nullable().optional(),
     captured_at: z.string().min(1).optional(),
   })
@@ -49,14 +50,15 @@ export async function registerRuntimeStats(
     upsertLiveStats(db, body.project_id, body);
     db.prepare(
       `INSERT INTO runtime_stats_events (
-         project_id, policy_id, model_id, feature_id, hashed_request_count,
-         canary_request_count, fallback_count, request_count, pii_blocked_count,
-         captured_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         project_id, policy_id, model_id, candidate_id, feature_id,
+         hashed_request_count, canary_request_count, fallback_count,
+         request_count, pii_blocked_count, captured_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       body.project_id,
       body.policy_id ?? null,
       body.model_id ?? null,
+      body.candidate_id ?? null,
       body.feature_id ?? null,
       body.hashed_request_count,
       body.canary_request_count,

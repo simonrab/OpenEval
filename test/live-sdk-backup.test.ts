@@ -10,10 +10,10 @@ import {
   type UnsignedPolicy,
 } from "../src/policy.js";
 
-const evalrouterKey = "evalrouter-seal-key-not-a-secret";
+const openevalKey = "openeval-seal-key-not-a-secret";
 const vendorKey = "sk-or-v1-app-vendor-key";
 const projectId = "prj_live_sdk_l3";
-const evalrouterUrl = "http://127.0.0.1:3000";
+const openevalUrl = "http://127.0.0.1:3000";
 const primaryModel = "openai/gpt-4.1-nano";
 const backupModel = "anthropic/claude-haiku-4.5";
 const backupTwoModel = "openai/gpt-4.1";
@@ -35,7 +35,7 @@ function sampleUnsigned(extra?: Partial<UnsignedPolicy>): UnsignedPolicy {
 }
 
 function signedPolicy(extra?: Partial<UnsignedPolicy>): SignedPolicy {
-  return signPolicy(evalrouterKey, sampleUnsigned(extra));
+  return signPolicy(openevalKey, sampleUnsigned(extra));
 }
 
 type FetchCall = {
@@ -148,7 +148,7 @@ describe("Live SDK hop L3", () => {
   let sdk: ReturnType<typeof createLiveSdk>;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-live-sdk-l3-"));
+    dir = mkdtempSync(join(tmpdir(), "openeval-live-sdk-l3-"));
     lastKnownPath = join(dir, "last-known.json");
     calls = [];
     policyReply = () =>
@@ -175,8 +175,8 @@ describe("Live SDK hop L3", () => {
 
     sdk = createLiveSdk({
       projectId,
-      evalrouterUrl,
-      evalrouterKey,
+      openevalUrl,
+      openevalKey,
       vendorKey,
       lastKnownPath,
       pollMs: 30_000,

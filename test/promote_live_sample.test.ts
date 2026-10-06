@@ -66,8 +66,8 @@ describe("promote_live_sample (R4)", () => {
   const redactedOutput = "The vendor returned HTTP 503.";
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-promote-sample-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-promote-sample-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     openRouterCalled = false;
     const openRouterClient = createMockOpenRouter(() => {
       openRouterCalled = true;

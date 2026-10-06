@@ -27,7 +27,7 @@ import {
 
 const apiKey = "test-key-not-a-secret";
 const vendorKey = "sk-or-v1-app-vendor-key";
-const evalrouterUrl = "http://test.local";
+const openevalUrl = "http://test.local";
 const LAST_FULL_MODEL = "openai/gpt-4.1-mini";
 const BACKUP_ONE = "openai/gpt-4.1-nano";
 const BACKUP_TWO = "google/gemini-flash-1.5";
@@ -86,8 +86,8 @@ describe("Live demo harness (L8)", () => {
   let controlPlaneOpenRouterCalls: number;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-live-demo-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-live-demo-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     lastKnownPath = join(dir, "last-known.json");
     controlPlaneUp = true;
     failPrimaryOnce = false;
@@ -98,7 +98,7 @@ describe("Live demo harness (L8)", () => {
     app = await buildApp({
       sqlitePath,
       apiKey,
-      baseUrl: evalrouterUrl,
+      baseUrl: openevalUrl,
       openRouterClient: createMockOpenRouter(() => {
         controlPlaneOpenRouterCalls += 1;
         throw new Error("Live demo must not call OpenRouter from the control plane");
@@ -116,7 +116,7 @@ describe("Live demo harness (L8)", () => {
 
     hop = createHopFetch({
       app,
-      evalrouterUrl,
+      openevalUrl,
       isControlPlaneUp: () => controlPlaneUp,
       vendorResponse: (model) => {
         if (failPrimaryOnce && model === LAST_FULL_MODEL) {
@@ -129,8 +129,8 @@ describe("Live demo harness (L8)", () => {
 
     sdk = createLiveSdk({
       projectId,
-      evalrouterUrl,
-      evalrouterKey: apiKey,
+      openevalUrl,
+      openevalKey: apiKey,
       vendorKey,
       lastKnownPath,
       pollMs: 30_000,
@@ -575,8 +575,8 @@ describe("Live demo harness (L8)", () => {
     sdk.stop();
     const failOpen = createLiveSdk({
       projectId,
-      evalrouterUrl,
-      evalrouterKey: apiKey,
+      openevalUrl,
+      openevalKey: apiKey,
       vendorKey,
       lastKnownPath,
       pollMs: 30_000,

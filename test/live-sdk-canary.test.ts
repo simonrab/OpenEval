@@ -11,10 +11,10 @@ import {
   type UnsignedPolicy,
 } from "../src/policy.js";
 
-const evalrouterKey = "evalrouter-seal-key-not-a-secret";
+const openevalKey = "openeval-seal-key-not-a-secret";
 const vendorKey = "sk-or-v1-app-vendor-key";
 const projectId = "prj_live_sdk_l6";
-const evalrouterUrl = "http://127.0.0.1:3000";
+const openevalUrl = "http://127.0.0.1:3000";
 const lastFullModel = "openai/gpt-4.1-mini";
 const canaryModel = "anthropic/claude-3-haiku";
 
@@ -35,12 +35,12 @@ function sampleUnsigned(extra?: Partial<UnsignedPolicy>): UnsignedPolicy {
 }
 
 function signedLastFull(): SignedPolicy {
-  return signPolicy(evalrouterKey, sampleUnsigned());
+  return signPolicy(openevalKey, sampleUnsigned());
 }
 
 function signedCanary(): SignedPolicy {
   return signPolicy(
-    evalrouterKey,
+    openevalKey,
     sampleUnsigned({
       policy_id: "pol_canary_l6",
       version: 2,
@@ -159,7 +159,7 @@ describe("Live SDK canary hop (R5, R6)", () => {
   let sdk: ReturnType<typeof createLiveSdk>;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-live-sdk-l6-"));
+    dir = mkdtempSync(join(tmpdir(), "openeval-live-sdk-l6-"));
     lastKnownPath = join(dir, "last-known.json");
     calls = [];
     policyReply = () =>
@@ -189,8 +189,8 @@ describe("Live SDK canary hop (R5, R6)", () => {
 
     sdk = createLiveSdk({
       projectId,
-      evalrouterUrl,
-      evalrouterKey,
+      openevalUrl,
+      openevalKey,
       vendorKey,
       lastKnownPath,
       pollMs: 30_000,
@@ -354,8 +354,8 @@ describe("Live SDK canary hop (R5, R6)", () => {
       }) as typeof fetch;
       const local = createLiveSdk({
         projectId,
-        evalrouterUrl,
-        evalrouterKey,
+        openevalUrl,
+        openevalKey,
         vendorKey,
         lastKnownPath: join(dir, `last-known-${String(percent)}.json`),
         pollMs: 30_000,

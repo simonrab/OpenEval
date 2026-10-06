@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { namedModelMismatchError } from "../errors.js";
 import type { AgentError } from "../tools/types.js";
+import type { Candidate } from "../runner/candidates.js";
 
 export type NamedModelRef = { rec_id: string; model_id: string };
 
@@ -68,4 +69,26 @@ export function validateRecheckNamedModel(
 /** Recheck scores only the named model, not backups. */
 export function recheckModelIds(namedModel: NamedModelRef): string[] {
   return [namedModel.model_id];
+}
+
+/** Reps of the run that named the model. A recheck uses the same reps, so the scoring is the same. */
+export function getRecommendationReps(db: Database.Database, recId: string): number | null {
+  const row = db
+    .prepare(
+      `SELECT runs.reps AS reps FROM recommendations
+       JOIN runs ON runs.id = recommendations.run_id WHERE recommendations.id = ?`,
+    )
+    .get(recId) as { reps: number | null } | undefined;
+  return row?.reps ?? null;
+}
+
+/** The candidate stored with a recommendation, when the run used candidates. */
+export function getRecommendationCandidate(
+  db: Database.Database,
+  recId: string,
+): Candidate | null {
+  const row = db
+    .prepare(`SELECT candidate_json FROM recommendations WHERE id = ?`)
+    .get(recId) as { candidate_json: string | null } | undefined;
+  return row?.candidate_json ? (JSON.parse(row.candidate_json) as Candidate) : null;
 }

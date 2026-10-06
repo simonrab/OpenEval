@@ -100,7 +100,7 @@ function policyLabel(
   if (!doc) {
     return policyId;
   }
-  return `${policyId} (${doc.primary.model_id})`;
+  return `${policyId} (${doc.primary.candidate_id ?? doc.primary.model_id})`;
 }
 
 function intentLabel(intent: string): string {

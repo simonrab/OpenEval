@@ -3,7 +3,8 @@ import { projectNotFoundError } from "../errors.js";
 import { projectExists } from "../keys.js";
 import { buildLiveReportUrl } from "../live-report-token.js";
 import { CANARY_PERCENT } from "../live/sticky.js";
-import { getProjectLiveState } from "../policy.js";
+import { getPolicyRow, getProjectLiveState, type SignedPolicy } from "../policy.js";
+import { entryCandidateId } from "../live/request.js";
 import { buildLiveAutomationReport } from "./live_automation.js";
 import {
   countProjectSamples,
@@ -52,10 +53,23 @@ function lastKnownAgeS(loadedAt: string | null | undefined, nowMs: number): numb
   return Math.max(0, Math.floor((nowMs - t) / 1000));
 }
 
+function primarySetupId(db: Database.Database, policyId: string | null | undefined): string | null {
+  const row = policyId ? getPolicyRow(db, policyId) : null;
+  if (!row) {
+    return null;
+  }
+  try {
+    return entryCandidateId((JSON.parse(row.body_json) as SignedPolicy).primary);
+  } catch {
+    return null;
+  }
+}
+
 function mapSample(row: SampleRow) {
   return {
     sample_id: row.id,
     why: row.why as "vendor_error" | "timeout" | "app_reported",
+    candidate_id: row.candidate_id ?? null,
     input_redacted: truncateSnippet(row.input_redacted),
     output_redacted: truncateSnippet(row.output_redacted),
   };
@@ -104,7 +118,9 @@ export function buildLiveReport(
 
   const output = getLiveReportOutputSchema.parse({
     policy_id: state?.last_full_policy_id ?? null,
+    candidate_id: primarySetupId(db, state?.last_full_policy_id),
     canary: canaryOn,
+    canary_candidate_id: canaryOn ? primarySetupId(db, state?.canary_policy_id) : null,
     intended_split: intendedSplit,
     observed_split: observedSplit,
     fallback_rate: fallbackRate,

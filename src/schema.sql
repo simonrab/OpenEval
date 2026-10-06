@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS evals (
   evidence_json TEXT,
   draft_mark TEXT,
   trusted_mark TEXT,
+  mark_output TEXT,
+  trusted_output TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -108,12 +110,21 @@ CREATE TABLE IF NOT EXISTS run_results (
   run_id TEXT NOT NULL,
   eval_id TEXT NOT NULL,
   model_id TEXT NOT NULL,
+  rep INTEGER NOT NULL DEFAULT 0,
   passed INTEGER NOT NULL,
+  outcome TEXT NOT NULL DEFAULT 'scored' CHECK (outcome IN ('scored', 'error')),
   reason_short TEXT NOT NULL,
   time_ms REAL NOT NULL,
   cost_usd REAL NOT NULL,
+  cost_source TEXT,
+  prompt_tokens INTEGER,
+  completion_tokens INTEGER,
+  served_model TEXT,
+  attempts INTEGER NOT NULL DEFAULT 1,
+  output_truncated TEXT,
+  judge_cost_usd REAL,
   created_at TEXT NOT NULL,
-  UNIQUE (run_id, eval_id, model_id),
+  UNIQUE (run_id, eval_id, model_id, rep),
   FOREIGN KEY (run_id) REFERENCES runs(id),
   FOREIGN KEY (eval_id) REFERENCES evals(id)
 );
@@ -172,6 +183,7 @@ CREATE TABLE IF NOT EXISTS marks (
   eval_id TEXT NOT NULL,
   person_id TEXT NOT NULL,
   mark_json TEXT NOT NULL,
+  judged_output TEXT,
   is_third INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   UNIQUE (eval_set_id, eval_id, person_id),
@@ -344,3 +356,91 @@ CREATE TABLE IF NOT EXISTS decision_audit_events (
   created_at TEXT NOT NULL,
   FOREIGN KEY (project_id) REFERENCES projects(id)
 );
+
+-- Optimizer referee: train/holdout split per eval-set lineage. Rows never change.
+CREATE TABLE IF NOT EXISTS eval_splits (
+  eval_set_id TEXT NOT NULL,
+  eval_id TEXT NOT NULL,
+  split TEXT NOT NULL CHECK (split IN ('train', 'holdout')),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (eval_set_id, eval_id),
+  FOREIGN KEY (eval_set_id) REFERENCES eval_sets(id),
+  FOREIGN KEY (eval_id) REFERENCES evals(id)
+);
+
+-- Optimizer referee: one row per recorded verdict in a session.
+CREATE TABLE IF NOT EXISTS optimization_rounds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  baseline_run_id TEXT NOT NULL,
+  baseline_candidate_id TEXT NOT NULL,
+  candidate_run_id TEXT NOT NULL,
+  candidate_id TEXT NOT NULL,
+  objective TEXT NOT NULL,
+  verdict TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES projects(id)
+);
+
+CREATE INDEX IF NOT EXISTS optimization_rounds_session
+  ON optimization_rounds (project_id, session_id, id);
+
+-- Optimizer referee: project keys with a narrow scope. Only the hash is stored.
+CREATE TABLE IF NOT EXISTS scoped_api_keys (
+  key_hash TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  scope TEXT NOT NULL CHECK (scope IN ('optimizer')),
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES projects(id)
+);
+
+-- Optimizer referee: a secret salt per eval-set lineage for the split hash.
+CREATE TABLE IF NOT EXISTS eval_split_salts (
+  eval_set_id TEXT PRIMARY KEY,
+  salt TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (eval_set_id) REFERENCES eval_sets(id)
+);
+
+-- Grader: a model judge per eval-set lineage. It is trusted only after calibration.
+CREATE TABLE IF NOT EXISTS judges (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  lineage_id TEXT NOT NULL UNIQUE,
+  judge_model TEXT NOT NULL,
+  rubric TEXT NOT NULL,
+  settings_json TEXT NOT NULL,
+  config_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES projects(id),
+  FOREIGN KEY (lineage_id) REFERENCES eval_sets(id)
+);
+
+-- Grader: judge agreement with human marks. Rows are append-only.
+CREATE TABLE IF NOT EXISTS judge_calibrations (
+  id TEXT PRIMARY KEY,
+  judge_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  lineage_id TEXT NOT NULL,
+  eval_set_id TEXT NOT NULL,
+  config_hash TEXT NOT NULL,
+  items_fingerprint TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('trusted', 'uncalibrated')),
+  reason TEXT NOT NULL,
+  n_items INTEGER NOT NULL,
+  n_train INTEGER NOT NULL,
+  n_test INTEGER NOT NULL,
+  n_agree INTEGER NOT NULL,
+  n_judge_errors INTEGER NOT NULL,
+  accuracy REAL,
+  kappa REAL,
+  cost_usd REAL NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (judge_id) REFERENCES judges(id),
+  FOREIGN KEY (project_id) REFERENCES projects(id)
+);
+
+CREATE INDEX IF NOT EXISTS judge_calibrations_lineage
+  ON judge_calibrations (lineage_id, created_at);

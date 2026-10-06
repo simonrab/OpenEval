@@ -17,8 +17,8 @@ describe("POST /v1/projects", () => {
   let sqlitePath: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-projects-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-projects-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await buildApp({ sqlitePath, apiKey });
   });
 
@@ -52,14 +52,14 @@ describe("POST /v1/projects", () => {
 
 describe("npm start", () => {
   it("creates SQLite on disk", { timeout: 20_000 }, async () => {
-    const dir = mkdtempSync(join(tmpdir(), "evalrouter-start-"));
-    const sqlitePath = join(dir, "evalrouter.sqlite");
+    const dir = mkdtempSync(join(tmpdir(), "openeval-start-"));
+    const sqlitePath = join(dir, "openeval.sqlite");
     const child = spawn("npm", ["start"], {
       cwd: repoRoot,
       env: {
         ...process.env,
-        EVALROUTER_KEY: apiKey,
-        EVALROUTER_SQLITE: sqlitePath,
+        OPENEVAL_KEY: apiKey,
+        OPENEVAL_SQLITE: sqlitePath,
         PORT: "0",
       },
       stdio: ["ignore", "pipe", "pipe"],

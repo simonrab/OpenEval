@@ -25,8 +25,8 @@ describe("cost cap (J7 partial)", () => {
   let keysRef: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-cap-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-cap-"));
+    sqlitePath = join(dir, "openeval.sqlite");
 
     app = await buildApp({
       sqlitePath,

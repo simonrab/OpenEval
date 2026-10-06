@@ -1,5 +1,5 @@
 # Minimal GitHub Action: calls examples/ci-recheck.sh only (no recommend_models).
-name: EvalRouter recheck
+name: OpenEval recheck
 
 on:
   workflow_dispatch:
@@ -13,12 +13,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run CI recheck
         env:
-          EVALROUTER_URL: ${{ secrets.EVALROUTER_URL }}
-          EVALROUTER_API_KEY: ${{ secrets.EVALROUTER_API_KEY }}
-          PROJECT_ID: ${{ secrets.EVALROUTER_PROJECT_ID }}
-          EVAL_SET_ID: ${{ secrets.EVALROUTER_EVAL_SET_ID }}
-          REC_ID: ${{ secrets.EVALROUTER_REC_ID }}
-          MODEL_ID: ${{ secrets.EVALROUTER_MODEL_ID }}
-          KEYS_REF: ${{ secrets.EVALROUTER_KEYS_REF }}
-          MAX_EVAL_SPEND_USD: ${{ vars.EVALROUTER_MAX_EVAL_SPEND_USD || '1' }}
+          OPENEVAL_URL: ${{ secrets.OPENEVAL_URL }}
+          OPENEVAL_API_KEY: ${{ secrets.OPENEVAL_API_KEY }}
+          PROJECT_ID: ${{ secrets.OPENEVAL_PROJECT_ID }}
+          EVAL_SET_ID: ${{ secrets.OPENEVAL_EVAL_SET_ID }}
+          REC_ID: ${{ secrets.OPENEVAL_REC_ID }}
+          MODEL_ID: ${{ secrets.OPENEVAL_MODEL_ID }}
+          KEYS_REF: ${{ secrets.OPENEVAL_KEYS_REF }}
+          MAX_EVAL_SPEND_USD: ${{ vars.OPENEVAL_MAX_EVAL_SPEND_USD || '1' }}
         run: bash examples/ci-recheck.sh

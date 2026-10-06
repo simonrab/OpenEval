@@ -2,7 +2,7 @@
 
 Slice for the coding agent only. Other slices own marking, scoring rules, failure intake, and recheck-on-change. This slice says who this user is, which jobs it finishes, and the seven tools it calls.
 
-EvalRouter checks that an AI feature works with evals, names the cheapest fast model that still passes, and runs that check again when the product changes. The app still sends live user requests to OpenRouter or the model company. This tool does not sit on that path. First version does not rewrite prompts. It does not change the live model by itself.
+OpenEval checks that an AI feature works with evals, names the cheapest fast model that still passes, and runs that check again when the product changes. The app still sends live user requests to OpenRouter or the model company. This tool does not sit on that path. First version does not rewrite prompts. It does not change the live model by itself.
 
 ## User
 

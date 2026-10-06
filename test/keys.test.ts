@@ -68,8 +68,8 @@ describe("POST /v1/keys", () => {
   let sqlitePath: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-keys-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-keys-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await buildApp({ sqlitePath, apiKey });
   });
 
@@ -154,8 +154,8 @@ describe("GET /v1/keys/:id and project listing", () => {
   let keysRef: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-keys-get-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-keys-get-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await buildApp({ sqlitePath, apiKey });
     projectId = await createProject(app);
     const created = await app.inject({

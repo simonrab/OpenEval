@@ -22,8 +22,8 @@ describe("eval-set version 1 schema", () => {
   let sqlitePath: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-evalset-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-evalset-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await buildApp({ sqlitePath, apiKey });
   });
 

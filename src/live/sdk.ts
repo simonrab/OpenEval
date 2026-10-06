@@ -14,7 +14,14 @@ import {
   stickyId,
 } from "./sticky.js";
 import { ErrorCode } from "../tools/types.js";
+import { settingsBody, type ModelSettings } from "../runner/openrouter.js";
 import { assessLiveRequest } from "./assess.js";
+import {
+  entryCandidateId,
+  mergeSettings,
+  pickSystemPrompt,
+  type SystemPromptSource,
+} from "./request.js";
 import {
   redactSampleFields,
   type LiveSample,
@@ -49,8 +56,8 @@ class VendorError extends Error {
 
 export type LiveSdkOptions = {
   projectId: string;
-  evalrouterUrl: string;
-  evalrouterKey: string;
+  openevalUrl: string;
+  openevalKey: string;
   vendorKey: string;
   lastKnownPath: string;
   spoolPath?: string;
@@ -58,23 +65,36 @@ export type LiveSdkOptions = {
   pollMs?: number;
   fetch?: typeof fetch;
   now?: () => number;
+  /**
+   * Default false. When true and the policy setup has a system_prompt (the
+   * prompt that won the evals), the SDK sends it and it replaces `system`.
+   * When false the SDK never sends the policy prompt.
+   */
+  applyPolicySystemPrompt?: boolean;
 };
 
 export type LiveCompleteInput = {
   prompt: string;
   user_id?: string;
   request_id?: string;
+  /** The app system prompt. */
+  system?: string;
+  /** App default settings. Policy settings win for the fields they set. */
+  settings?: ModelSettings;
 };
 
 export type LiveCompleteResult = {
   content: string;
   model_id: string;
+  candidate_id: string;
   policy_id: string;
+  system_prompt_source: SystemPromptSource;
 };
 
 export type LiveStreamToken = {
   content: string;
   model_id: string;
+  candidate_id: string;
   policy_id: string;
 };
 
@@ -108,18 +128,18 @@ function noLastKnownError(): LiveSdkError {
   );
 }
 
-function policyUrl(evalrouterUrl: string, projectId: string): string {
-  const base = evalrouterUrl.replace(/\/+$/, "");
+function policyUrl(openevalUrl: string, projectId: string): string {
+  const base = openevalUrl.replace(/\/+$/, "");
   return `${base}/v1/runtime/policies/${encodeURIComponent(projectId)}`;
 }
 
-function samplesUrl(evalrouterUrl: string): string {
-  const base = evalrouterUrl.replace(/\/+$/, "");
+function samplesUrl(openevalUrl: string): string {
+  const base = openevalUrl.replace(/\/+$/, "");
   return `${base}/v1/runtime/samples`;
 }
 
-function statsUrl(evalrouterUrl: string): string {
-  const base = evalrouterUrl.replace(/\/+$/, "");
+function statsUrl(openevalUrl: string): string {
+  const base = openevalUrl.replace(/\/+$/, "");
   return `${base}/v1/runtime/stats`;
 }
 
@@ -139,7 +159,7 @@ async function atomicWriteFile(path: string, text: string): Promise<void> {
 
 async function readVerifiedLastKnown(
   path: string,
-  evalrouterKey: string,
+  openevalKey: string,
 ): Promise<{ doc: RuntimePolicyDocument; text: string } | null> {
   let text: string;
   try {
@@ -150,7 +170,7 @@ async function readVerifiedLastKnown(
   if (text.length === 0) {
     return null;
   }
-  const doc = parseRuntimePolicyDocument(evalrouterKey, text);
+  const doc = parseRuntimePolicyDocument(openevalKey, text);
   if (!doc) {
     return null;
   }
@@ -301,9 +321,9 @@ async function* readSseContent(
 export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
   const fetchFn = options.fetch ?? fetch;
   const pollMs = capPollMs(options.pollMs);
-  const getUrl = policyUrl(options.evalrouterUrl, options.projectId);
-  const ingestUrl = samplesUrl(options.evalrouterUrl);
-  const hopStatsUrl = statsUrl(options.evalrouterUrl);
+  const getUrl = policyUrl(options.openevalUrl, options.projectId);
+  const ingestUrl = samplesUrl(options.openevalUrl);
+  const hopStatsUrl = statsUrl(options.openevalUrl);
   const spoolDir = options.spoolPath ?? join(dirname(options.lastKnownPath), "sample-spool");
   const spoolMaxFiles = options.spoolMaxFiles ?? 64;
 
@@ -318,6 +338,7 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
   let hashedRequestCount = 0;
   let canaryRequestCount = 0;
   let lastModelId: string | null = null;
+  let lastCandidateId: string | null = null;
   let lastPolicyId: string | null = null;
   let lastKnownLoadedAt: string | null = null;
 
@@ -352,20 +373,23 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
     }
   }
 
-  function queueSample(args: {
+  type SampleArgs = {
     prompt: string;
     output: string;
     why: SampleWhy;
     modelId: string;
+    candidateId: string;
     policyId: string;
-  }): void {
+  };
+
+  function queueSample(args: SampleArgs): void {
     void persistSample(args).catch(() => undefined);
   }
 
   function queueFromError(
     prompt: string,
     err: unknown,
-    modelId: string,
+    entry: PolicyModel,
     policyId: string,
   ): void {
     const why: SampleWhy =
@@ -376,18 +400,13 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
       prompt,
       output,
       why,
-      modelId,
+      modelId: entry.model_id,
+      candidateId: entryCandidateId(entry),
       policyId,
     });
   }
 
-  async function persistSample(args: {
-    prompt: string;
-    output: string;
-    why: SampleWhy;
-    modelId: string;
-    policyId: string;
-  }): Promise<void> {
+  async function persistSample(args: SampleArgs): Promise<void> {
     const redacted = redactSampleFields(args.prompt, args.output);
     if (!redacted.ok) {
       piiBlockedCount += 1;
@@ -398,6 +417,7 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
       project_id: options.projectId,
       policy_id: args.policyId,
       model_id: args.modelId,
+      candidate_id: args.candidateId,
       why: args.why,
       input_redacted: redacted.input_redacted,
       output_redacted: redacted.output_redacted,
@@ -410,7 +430,7 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
     return fetchFn(ingestUrl, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${options.evalrouterKey}`,
+        Authorization: `Bearer ${options.openevalKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(sample),
@@ -454,7 +474,7 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
       const res = await fetchFn(hopStatsUrl, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${options.evalrouterKey}`,
+          Authorization: `Bearer ${options.openevalKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -467,6 +487,7 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
           last_known_loaded_at: lastKnownLoadedAt,
           policy_id: lastPolicyId,
           model_id: lastModelId,
+          candidate_id: lastCandidateId,
         }),
       });
       if (!res.ok) {
@@ -483,7 +504,7 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
     }
     const loaded = await readVerifiedLastKnown(
       options.lastKnownPath,
-      options.evalrouterKey,
+      options.openevalKey,
     );
     if (!loaded) {
       return;
@@ -495,7 +516,7 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
   async function refreshFromControlPlane(): Promise<void> {
     try {
       const headers: Record<string, string> = {
-        Authorization: `Bearer ${options.evalrouterKey}`,
+        Authorization: `Bearer ${options.openevalKey}`,
       };
       if (etag) {
         headers["If-None-Match"] = etag;
@@ -511,7 +532,7 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
         return;
       }
       const text = await res.text();
-      const doc = parseRuntimePolicyDocument(options.evalrouterKey, text);
+      const doc = parseRuntimePolicyDocument(options.openevalKey, text);
       if (!doc) {
         await uploadHopStats();
         return;
@@ -535,10 +556,32 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
     }, pollMs);
   }
 
+  function vendorBody(
+    model: PolicyModel,
+    input: LiveCompleteInput,
+    stream: boolean,
+  ): { body: string; source: SystemPromptSource } {
+    const system = pickSystemPrompt(
+      model,
+      input.system,
+      options.applyPolicySystemPrompt === true,
+    );
+    const messages = [
+      ...(system.text ? [{ role: "system", content: system.text }] : []),
+      { role: "user", content: input.prompt },
+    ];
+    const body = JSON.stringify({
+      model: model.model_id,
+      messages,
+      ...settingsBody(mergeSettings(input.settings, model.settings)),
+      ...(stream ? { stream: true } : {}),
+    });
+    return { body, source: system.source };
+  }
+
   async function postVendor(
     model: PolicyModel,
-    prompt: string,
-    stream: boolean,
+    body: string,
     signal: AbortSignal,
   ): Promise<Response> {
     try {
@@ -548,11 +591,7 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
           Authorization: `Bearer ${options.vendorKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: model.model_id,
-          messages: [{ role: "user", content: prompt }],
-          ...(stream ? { stream: true } : {}),
-        }),
+        body,
         signal,
       });
     } catch (err) {
@@ -565,12 +604,13 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
 
   async function completeJson(
     model: PolicyModel,
-    prompt: string,
+    input: LiveCompleteInput,
     policyId: string,
   ): Promise<LiveCompleteResult> {
     const deadline = startDeadline(model.timeout_ms);
+    const request = vendorBody(model, input, false);
     try {
-      const res = await postVendor(model, prompt, false, deadline.signal);
+      const res = await postVendor(model, request.body, deadline.signal);
       if (!res.ok) {
         await cancelBody(res);
         throw vendorHttpError(res.status);
@@ -582,7 +622,9 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
       return {
         content,
         model_id: model.model_id,
+        candidate_id: entryCandidateId(model),
         policy_id: policyId,
+        system_prompt_source: request.source,
       };
     } catch (err) {
       if (err instanceof VendorError) {
@@ -599,13 +641,17 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
 
   async function* streamModel(
     model: PolicyModel,
-    prompt: string,
+    input: LiveCompleteInput,
     policyId: string,
   ): AsyncGenerator<LiveStreamToken> {
     const deadline = startDeadline(model.timeout_ms);
     let sawToken = false;
     try {
-      const res = await postVendor(model, prompt, true, deadline.signal);
+      const res = await postVendor(
+        model,
+        vendorBody(model, input, true).body,
+        deadline.signal,
+      );
       if (!res.ok) {
         await cancelBody(res);
         throw vendorHttpError(res.status);
@@ -621,6 +667,7 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
         yield {
           content,
           model_id: model.model_id,
+          candidate_id: entryCandidateId(model),
           policy_id: policyId,
         };
       }
@@ -642,6 +689,11 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
     }
   }
 
+  function noteServed(served: { model_id: string; candidate_id: string }): void {
+    lastModelId = served.model_id;
+    lastCandidateId = served.candidate_id;
+  }
+
   function oneBackup(cached: SignedPolicy): PolicyModel | undefined {
     return cached.backups[0];
   }
@@ -660,31 +712,22 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
       const cached = pickPolicy(input);
       noteRequest(input, cached);
       try {
-        const result = await completeJson(
-          cached.primary,
-          input.prompt,
-          cached.policy_id,
-        );
-        lastModelId = result.model_id;
+        const result = await completeJson(cached.primary, input, cached.policy_id);
+        noteServed(result);
         return result;
       } catch (err) {
         const backup = oneBackup(cached);
+        queueFromError(input.prompt, err, cached.primary, cached.policy_id);
         if (!backup || !isRetryableVendor(err)) {
-          queueFromError(input.prompt, err, cached.primary.model_id, cached.policy_id);
           throw err;
         }
         fallbackCount += 1;
-        queueFromError(input.prompt, err, cached.primary.model_id, cached.policy_id);
         try {
-          const result = await completeJson(
-            backup,
-            input.prompt,
-            cached.policy_id,
-          );
-          lastModelId = result.model_id;
+          const result = await completeJson(backup, input, cached.policy_id);
+          noteServed(result);
           return result;
         } catch (backupErr) {
-          queueFromError(input.prompt, backupErr, backup.model_id, cached.policy_id);
+          queueFromError(input.prompt, backupErr, backup, cached.policy_id);
           throw backupErr;
         }
       }
@@ -695,44 +738,25 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
       noteRequest(input, cached);
       let sawToken = false;
       try {
-        for await (const token of streamModel(
-          cached.primary,
-          input.prompt,
-          cached.policy_id,
-        )) {
+        for await (const token of streamModel(cached.primary, input, cached.policy_id)) {
           sawToken = true;
-          lastModelId = token.model_id;
+          noteServed(token);
           yield token;
         }
       } catch (err) {
         const backup = oneBackup(cached);
+        queueFromError(input.prompt, err, cached.primary, cached.policy_id);
         if (sawToken || !backup || !isRetryableVendor(err)) {
-          queueFromError(
-            input.prompt,
-            err,
-            cached.primary.model_id,
-            cached.policy_id,
-          );
           throw err;
         }
         fallbackCount += 1;
-        queueFromError(
-          input.prompt,
-          err,
-          cached.primary.model_id,
-          cached.policy_id,
-        );
         try {
-          for await (const token of streamModel(
-            backup,
-            input.prompt,
-            cached.policy_id,
-          )) {
-            lastModelId = token.model_id;
+          for await (const token of streamModel(backup, input, cached.policy_id)) {
+            noteServed(token);
             yield token;
           }
         } catch (backupErr) {
-          queueFromError(input.prompt, backupErr, backup.model_id, cached.policy_id);
+          queueFromError(input.prompt, backupErr, backup, cached.policy_id);
           throw backupErr;
         }
       }
@@ -748,6 +772,7 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
         output: input.output,
         why: "app_reported",
         modelId: lastModelId ?? cached.primary.model_id,
+        candidateId: lastCandidateId ?? entryCandidateId(cached.primary),
         policyId: lastPolicyId ?? cached.policy_id,
       });
     },

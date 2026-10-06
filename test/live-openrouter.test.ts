@@ -15,7 +15,7 @@ import {
   waitForRunComplete,
 } from "./helpers/run-fixtures.js";
 
-const LIVE = process.env.EVALROUTER_LIVE === "1";
+const LIVE = process.env.OPENEVAL_LIVE === "1";
 
 describe("live OpenRouter integration", { skip: !LIVE }, () => {
   let app: FastifyInstance;
@@ -28,11 +28,11 @@ describe("live OpenRouter integration", { skip: !LIVE }, () => {
   beforeEach(async () => {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
-      throw new Error("OPENROUTER_API_KEY required when EVALROUTER_LIVE=1");
+      throw new Error("OPENROUTER_API_KEY required when OPENEVAL_LIVE=1");
     }
 
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-live-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-live-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await buildApp({
       sqlitePath,
       apiKey: TEST_API_KEY,
@@ -91,7 +91,7 @@ describe("live OpenRouter integration", { skip: !LIVE }, () => {
 });
 
 describe("live OpenRouter integration (skipped)", { skip: LIVE }, () => {
-  it("skips when EVALROUTER_LIVE is unset", () => {
-    assert.notEqual(process.env.EVALROUTER_LIVE, "1");
+  it("skips when OPENEVAL_LIVE is unset", () => {
+    assert.notEqual(process.env.OPENEVAL_LIVE, "1");
   });
 });

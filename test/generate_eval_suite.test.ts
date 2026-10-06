@@ -71,8 +71,8 @@ describe("generate_eval_suite (J1)", () => {
   let sqlitePath: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-generate-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-generate-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await buildApp({
       sqlitePath,
       apiKey,

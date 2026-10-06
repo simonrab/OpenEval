@@ -93,8 +93,8 @@ describe("worker parallel fan-out", () => {
   let keysRef: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-worker-par-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-worker-par-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     db = openDb(sqlitePath);
     projectId = "prj_worker_par";
     db.prepare("INSERT INTO projects (id, created_at) VALUES (?, ?)").run(

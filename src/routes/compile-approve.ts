@@ -10,6 +10,7 @@ import {
   promoteToLastFullIfNone,
   recordPolicyDecision,
   verifyPolicy,
+  type PolicyModel,
   type SignedPolicy,
 } from "../policy.js";
 import { registerFormParser } from "./form-parser.js";
@@ -80,11 +81,25 @@ function parseSignedPolicy(bodyJson: string): SignedPolicy | null {
   }
 }
 
+function setupLabel(entry: PolicyModel): string {
+  const parts = [entry.candidate_id ?? entry.model_id];
+  if (entry.candidate_id && entry.candidate_id !== entry.model_id) {
+    parts.push(`model ${entry.model_id}`);
+  }
+  if (entry.settings && Object.keys(entry.settings).length > 0) {
+    parts.push(`settings ${JSON.stringify(entry.settings)}`);
+  }
+  if (entry.system_prompt) {
+    parts.push("has a system prompt");
+  }
+  return parts.join(", ");
+}
+
 function formatPolicy(doc: SignedPolicy) {
-  const backups = doc.backups.map((b) => b.model_id);
+  const backups = doc.backups.map(setupLabel);
   return {
-    primary: doc.primary.model_id,
-    backups: backups.length > 0 ? backups.join(", ") : "(none)",
+    primary: setupLabel(doc.primary),
+    backups: backups.length > 0 ? backups.join("; ") : "(none)",
     recId: doc.rec_id,
     steId: doc.ste_id,
   };

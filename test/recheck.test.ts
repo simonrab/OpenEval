@@ -84,8 +84,8 @@ describe("recheck (J7)", () => {
   let priorRunId: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-recheck-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-recheck-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     app = await createTestApp(sqlitePath);
 
     const proj = await app.inject({
@@ -216,6 +216,18 @@ describe("recheck (J7)", () => {
     const summary = report.summary as { n_pass: number; n_fail: number };
     assert.equal(summary.n_fail, 0);
     assert.ok(summary.n_pass >= 5);
+  });
+
+  it("recheck uses the reps of the run that named the model", async () => {
+    const db = new Database(sqlitePath);
+    db.prepare("UPDATE runs SET reps = 2 WHERE id = ?").run(priorRunId);
+    db.close();
+    const runId = await startRecheck();
+    await waitForRunComplete(app, projectId, runId);
+    const check = new Database(sqlitePath, { readonly: true });
+    const run = check.prepare("SELECT reps FROM runs WHERE id = ?").get(runId) as { reps: number };
+    check.close();
+    assert.equal(run.reps, 2);
   });
 
   it("recheck does not mutate the frozen eval set", async () => {

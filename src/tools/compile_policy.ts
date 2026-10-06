@@ -1,9 +1,13 @@
 import type Database from "better-sqlite3";
 import {
+  agentError,
   recNotApprovedError,
   projectNotFoundError,
   steMismatchError,
 } from "../errors.js";
+import { baseModelId, type Candidate } from "../runner/candidates.js";
+import { OPTIMIZE_INTENT } from "../runner/queue.js";
+import { ErrorCode } from "./types.js";
 import {
   getIdempotentResponse,
   storeIdempotentResponse,
@@ -14,8 +18,10 @@ import { projectExists } from "../keys.js";
 import {
   DEFAULT_MAX_WAIT_MS,
   getProjectLiveState,
+  POLICY_FORMAT,
   putPolicy,
   upsertDraftPolicy,
+  type PolicyModel,
   type UnsignedPolicy,
 } from "../policy.js";
 import {
@@ -37,7 +43,16 @@ type RecommendationRow = {
   eval_set_id: string;
   named_model_id: string | null;
   backup_model_ids: string;
+  candidate_json: string | null;
+  backup_candidates_json: string | null;
+  run_intent: string | null;
 };
+
+export const POLICY_SYSTEM_PROMPT_NOTE =
+  "This policy has the system prompt that won the evals. " +
+  "The SDK sends it only when you set applyPolicySystemPrompt to true. " +
+  "The proxy sends it only when the request has the header x-openeval-apply-system-prompt: true. " +
+  "When it is sent, it replaces the system prompt of your app.";
 
 function getRecommendation(
   db: Database.Database,
@@ -45,9 +60,12 @@ function getRecommendation(
 ): RecommendationRow | null {
   const row = db
     .prepare(
-      `SELECT id, project_id, eval_set_id, named_model_id, backup_model_ids
-       FROM recommendations
-       WHERE id = ?`,
+      `SELECT r.id, r.project_id, r.eval_set_id, r.named_model_id,
+              r.backup_model_ids, r.candidate_json, r.backup_candidates_json,
+              runs.intent AS run_intent
+       FROM recommendations r
+       LEFT JOIN runs ON runs.id = r.run_id
+       WHERE r.id = ?`,
     )
     .get(recommendationId) as RecommendationRow | undefined;
   return row ?? null;
@@ -80,6 +98,58 @@ function backupIds(raw: string): string[] {
   } catch {
     return [];
   }
+}
+
+function parseCandidates(raw: string | null): Candidate[] {
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    const list = Array.isArray(parsed) ? parsed : [parsed];
+    return list.filter(
+      (c): c is Candidate =>
+        c !== null && typeof c === "object" && typeof (c as Candidate).id === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** A format 2 target entry: the base model id plus the whole setup. */
+function targetEntry(
+  candidateId: string,
+  stored: Candidate | undefined,
+  timeoutMs: number,
+): PolicyModel {
+  const entry: PolicyModel = {
+    model_id: stored?.model ?? baseModelId(candidateId),
+    timeout_ms: timeoutMs,
+    candidate_id: candidateId,
+  };
+  if (stored?.settings && Object.keys(stored.settings).length > 0) {
+    entry.settings = stored.settings;
+  }
+  if (stored?.system_prompt) {
+    entry.system_prompt = stored.system_prompt;
+  }
+  return entry;
+}
+
+function optimizeRunError(projectId: string, evalSetId: string) {
+  return agentError({
+    code: ErrorCode.INVALID_INPUT,
+    message:
+      "This recommendation comes from app harness outputs. Use a recommendation from a run_evals run.",
+    retryable: false,
+    suggested_tool: "run_evals",
+    suggested_args: { project_id: projectId, eval_set_id: evalSetId },
+    next_action: {
+      tool: "run_evals",
+      args: { project_id: projectId, eval_set_id: evalSetId },
+      ask_human: null,
+    },
+  });
 }
 
 export const handleCompilePolicy: ToolHandler = (body, ctx) => {
@@ -121,6 +191,10 @@ export const handleCompilePolicy: ToolHandler = (body, ctx) => {
     return { status: 400, body: recNotApprovedError(rec.id) };
   }
 
+  if (rec.run_intent === OPTIMIZE_INTENT) {
+    return { status: 400, body: optimizeRunError(input.project_id, rec.eval_set_id) };
+  }
+
   if (rec.eval_set_id !== input.eval_set_id) {
     return {
       status: 400,
@@ -147,17 +221,26 @@ export const handleCompilePolicy: ToolHandler = (body, ctx) => {
       .get(input.project_id) as { n: number }
   ).n;
 
+  const winner = parseCandidates(rec.candidate_json).find(
+    (c) => c.id === rec.named_model_id,
+  );
+  const backupSetups = parseCandidates(rec.backup_candidates_json);
+  const primary = targetEntry(rec.named_model_id, winner, timeoutMs);
+
   const policyId = newPolicyId();
   const unsigned: UnsignedPolicy = {
     policy_id: policyId,
+    format: POLICY_FORMAT,
     version: existingCount + 1,
     previous_policy_id: previousId,
     project_id: input.project_id,
     rec_id: rec.id,
     ste_id: rec.eval_set_id,
     compiled_at: new Date().toISOString(),
-    primary: { model_id: rec.named_model_id, timeout_ms: timeoutMs },
-    backups: backups.map((model_id) => ({ model_id, timeout_ms: timeoutMs })),
+    primary,
+    backups: backups.map((id) =>
+      targetEntry(id, backupSetups.find((c) => c.id === id), timeoutMs),
+    ),
     canary: null,
   };
 
@@ -169,6 +252,14 @@ export const handleCompilePolicy: ToolHandler = (body, ctx) => {
 
   const output = compilePolicyOutputSchema.parse({
     policy_id: policyId,
+    format: POLICY_FORMAT,
+    primary: {
+      candidate_id: primary.candidate_id,
+      model_id: primary.model_id,
+      settings: primary.settings ?? null,
+      has_system_prompt: primary.system_prompt !== undefined,
+    },
+    system_prompt_note: primary.system_prompt ? POLICY_SYSTEM_PROMPT_NOTE : null,
     approve_url: approveUrl,
     live_traffic_changed: false,
     next_action: {

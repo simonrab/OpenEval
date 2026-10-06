@@ -2,16 +2,35 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type Database from "better-sqlite3";
 import { newPolicyId } from "./ids.js";
 import { CANARY_PERCENT, parseCanaryPercent } from "./live/sticky.js";
+import type { ModelSettings } from "./runner/openrouter.js";
 
 export const DEFAULT_MAX_WAIT_MS = 30000;
 
+/**
+ * Policy body format. A doc with no `format` field is format 1: target
+ * entries carry model_id and timeout_ms only. Format 2 entries also carry the
+ * candidate setup (candidate_id, settings, system_prompt), and model_id is the
+ * base model id with no `#label`. The seal covers every field.
+ */
+export const POLICY_FORMAT = 2;
+const KNOWN_POLICY_FORMATS = new Set([1, 2]);
+
+/**
+ * One target setup. settings win over app values only for the fields they
+ * set. system_prompt is the prompt that won the evals; the SDK and proxy send
+ * it only when the app opts in (see src/live/request.ts).
+ */
 export type PolicyModel = {
   model_id: string;
   timeout_ms: number;
+  candidate_id?: string;
+  settings?: ModelSettings;
+  system_prompt?: string;
 };
 
 export type UnsignedPolicy = {
   policy_id: string;
+  format?: number;
   version: number;
   previous_policy_id: string | null;
   project_id: string;
@@ -73,8 +92,16 @@ export function signPolicy(apiKey: string, unsigned: UnsignedPolicy): SignedPoli
   return { ...unsigned, sig: `hmac-sha256:${hex}` };
 }
 
+/** Format of a policy doc. No field means format 1. */
+export function policyFormat(doc: { format?: unknown }): number {
+  return doc.format === undefined ? 1 : Number(doc.format);
+}
+
 export function verifyPolicy(apiKey: string, doc: SignedPolicy): boolean {
   if (typeof doc.sig !== "string" || doc.sig.length === 0) {
+    return false;
+  }
+  if (!KNOWN_POLICY_FORMATS.has(policyFormat(doc))) {
     return false;
   }
   const expected = signPolicy(apiKey, doc).sig;

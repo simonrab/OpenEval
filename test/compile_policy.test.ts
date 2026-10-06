@@ -41,8 +41,8 @@ describe("compile_policy (R1)", () => {
   let openRouterCalled = false;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "evalrouter-compile-policy-"));
-    sqlitePath = join(dir, "evalrouter.sqlite");
+    dir = mkdtempSync(join(tmpdir(), "openeval-compile-policy-"));
+    sqlitePath = join(dir, "openeval.sqlite");
     openRouterCalled = false;
     const openRouterClient = createMockOpenRouter(() => {
       openRouterCalled = true;
