@@ -6,3 +6,17 @@ data/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# Local agent and build-planning notes.
+.cursor/
+AGENTS.md
+BUILD.md
+RUNTIME_BUILD.md
+V2_BUILD.md
+build/
+
+# Private product requirement drafts.
+*REQUIREMENTS.md
+
+# openeval-tune session state.
+.openeval-tune/
