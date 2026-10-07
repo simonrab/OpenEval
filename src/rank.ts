@@ -4,6 +4,7 @@ import {
   type CatalogModel,
 } from "./runner/catalog.js";
 import { baseModelId } from "./runner/candidates.js";
+import type { ToolChoice, ToolDefinition } from "./runner/openrouter.js";
 
 export type JobLimits = {
   needs_images?: boolean;
@@ -13,6 +14,8 @@ export type JobLimits = {
   allowed_models?: string[];
   excluded_models?: string[];
   system_prompt?: string;
+  tools?: ToolDefinition[];
+  tool_choice?: ToolChoice;
 };
 
 export type RunResultRow = {

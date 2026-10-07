@@ -64,9 +64,25 @@ const labeledExampleSchema = z
         path: z.string().min(1),
         value: z.unknown(),
       })
-      .strict(),
+      .strict()
+      .optional(),
+    expected_tool_call: z
+      .union([
+        z
+          .object({
+            name: z.string().min(1),
+            args: z.record(z.unknown()).optional(),
+            required: z.array(z.string().min(1)).optional(),
+          })
+          .strict(),
+        z.object({ none: z.literal(true) }).strict(),
+      ])
+      .optional(),
   })
-  .strict();
+  .strict()
+  .refine((e) => (e.expected == null) !== (e.expected_tool_call == null), {
+    message: "a labeled example needs expected or expected_tool_call, not both",
+  });
 
 const promptEvidenceSchema = z
   .object({
@@ -100,6 +116,20 @@ const toolSchemaEvidenceSchema = z
     schema: z.record(z.unknown()).optional(),
   })
   .strict();
+
+/** A tool that runs send to the model. The shape follows OpenAI function tools. */
+export const toolDefinitionSchema = z
+  .object({
+    name: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "tool name must be 1 to 64 letters, digits, _ or -"),
+    description: z.string().max(2000).optional(),
+    parameters: z.record(z.unknown()).optional(),
+  })
+  .strict();
+
+export const toolChoiceSchema = z.union([
+  z.enum(["auto", "required", "none"]),
+  z.object({ name: z.string().min(1) }).strict(),
+]);
 
 const sourceDocEvidenceSchema = z
   .object({
@@ -182,6 +212,8 @@ export const generateEvalSuiteInputSchema = z
     custom_archetypes: z.array(customArchetypeSchema).optional(),
     evidence: evidenceSchema.optional(),
     system_prompt: z.string().min(1).optional(),
+    tools: z.array(toolDefinitionSchema).min(1).max(64).optional(),
+    tool_choice: toolChoiceSchema.optional(),
     limits: limitsSchema.optional(),
     what_good_means: whatGoodMeansSchema.nullable().optional(),
     size: z.enum(["smoke", "standard"]).optional(),

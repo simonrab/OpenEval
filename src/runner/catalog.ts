@@ -6,6 +6,8 @@ export type CatalogModel = {
   inputModalities: string[];
   listCostPer1kUsd: number;
   created: number;
+  /** False when the catalog says the model has no tool calling. Undefined when the catalog does not say. */
+  supportsTools?: boolean;
 };
 
 export type CatalogLimits = {
@@ -14,6 +16,8 @@ export type CatalogLimits = {
   max_spend_usd_per_1k?: number;
   allowed_models?: string[];
   excluded_models?: string[];
+  /** Job tools. A job with tools needs a model with tool calling. */
+  tools?: unknown[];
 };
 
 export function matchesModelPattern(modelId: string, pattern: string): boolean {
@@ -63,6 +67,7 @@ export function parseOpenRouterModels(payload: unknown): CatalogModel[] {
       created?: unknown;
       architecture?: { input_modalities?: unknown };
       pricing?: { prompt?: unknown; completion?: unknown };
+      supported_parameters?: unknown;
     };
     if (typeof row.id !== "string" || !row.id.includes("/")) {
       continue;
@@ -80,6 +85,9 @@ export function parseOpenRouterModels(payload: unknown): CatalogModel[] {
       inputModalities: mods,
       listCostPer1kUsd: listCostPer1kUsd(prompt, completion),
       created: numberOrZero(row.created),
+      ...(Array.isArray(row.supported_parameters)
+        ? { supportsTools: row.supported_parameters.includes("tools") }
+        : {}),
     });
   }
   return out;
@@ -93,6 +101,9 @@ export function catalogModelFitsLimits(
     return true;
   }
   if (limits.needs_images && !model.supportsImages) {
+    return false;
+  }
+  if ((limits.tools?.length ?? 0) > 0 && model.supportsTools === false) {
     return false;
   }
   if (limits.modalities && limits.modalities.length > 0) {

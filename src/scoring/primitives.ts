@@ -1,3 +1,5 @@
+import { parseToolCalls } from "./tool-call.js";
+
 type ScoreResult = { passed: boolean; reason_short: string };
 
 function parseJson(text: string): unknown | null {
@@ -406,43 +408,32 @@ export function scoreLengthRange(output: string, expected: unknown): ScoreResult
   return { passed: true, reason_short: "length ok" };
 }
 
-function toolPayload(output: string): { name?: string; args?: unknown } | null {
-  const parsed = parseJson(output);
-  if (!parsed || typeof parsed !== "object") {
-    return null;
-  }
-  const obj = parsed as Record<string, unknown>;
-  const first = Array.isArray(obj.tool_calls) ? obj.tool_calls[0] : obj;
-  if (!first || typeof first !== "object") {
-    return null;
-  }
-  const call = first as Record<string, unknown>;
-  const name = call.name ?? call.tool_name ?? call.function;
-  let args = call.arguments ?? call.args ?? call.parameters;
-  if (typeof args === "string") {
-    args = parseJson(args);
-  }
-  return {
-    name: typeof name === "string" ? name : undefined,
-    args,
-  };
-}
-
 export function scoreToolArgs(output: string, expected: unknown): ScoreResult {
   const spec = expected as {
     name?: unknown;
     args?: unknown;
     required?: unknown;
+    none?: unknown;
   } | null;
-  if (!spec || (spec.name == null && spec.args == null && spec.required == null)) {
+  if (
+    !spec ||
+    (spec.name == null && spec.args == null && spec.required == null && spec.none !== true)
+  ) {
     return { passed: false, reason_short: "bad tool_args spec" };
   }
-  const call = toolPayload(output);
-  if (!call) {
+  const calls = parseToolCalls(output) ?? [];
+  if (spec.none === true) {
+    return calls.length === 0
+      ? { passed: true, reason_short: "no tool call, as expected" }
+      : { passed: false, reason_short: `unexpected tool call ${calls[0]!.name}` };
+  }
+  if (calls.length === 0) {
     return { passed: false, reason_short: "tool call missing" };
   }
-  if (typeof spec.name === "string" && call.name !== spec.name) {
-    return { passed: false, reason_short: "tool name mismatch" };
+  const call =
+    typeof spec.name === "string" ? calls.find((c) => c.name === spec.name) : calls[0];
+  if (!call) {
+    return { passed: false, reason_short: `tool name mismatch: ${calls[0]!.name}` };
   }
   const args =
     call.args && typeof call.args === "object" && !Array.isArray(call.args)

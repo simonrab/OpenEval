@@ -4,7 +4,7 @@ import { listMembers, type MemberEval } from "../eval-set.js";
 import { scorableEvals, scoreOutput } from "./score.js";
 import { trustedJudgeFn } from "../judge/runner.js";
 import { getJobGoodMeans } from "../mark/store.js";
-import { getJobSystemPrompt } from "../job.js";
+import { getJobSystemPrompt, getJobTools } from "../job.js";
 import { ErrorCode } from "../tools/types.js";
 import {
   claimNextRun,
@@ -13,7 +13,7 @@ import {
   listRunResults,
   updateRunStatus,
 } from "./queue.js";
-import type { OpenRouterClient } from "./openrouter.js";
+import { scoredOutput, type OpenRouterClient } from "./openrouter.js";
 import { runCandidates } from "./candidates.js";
 import { withRetries, type RetryOptions } from "./retry.js";
 import {
@@ -80,6 +80,7 @@ export async function processRun(opts: WorkerOptions, runId: string): Promise<vo
   const evals = scorableEvals(opts.db, members);
   const mustNever = getJobGoodMeans(opts.db, run.eval_set_id)?.must_never;
   const systemPrompt = getJobSystemPrompt(opts.db, run.eval_set_id) ?? undefined;
+  const jobTools = getJobTools(opts.db, run.eval_set_id);
   const wrapKey = deriveWrapKey(opts.apiKey);
   let customerKey: string;
   if (!run.keys_ref) {
@@ -123,6 +124,8 @@ export async function processRun(opts: WorkerOptions, runId: string): Promise<vo
               apiKey: customerKey,
               systemPrompt: candidate.system_prompt ?? systemPrompt,
               settings: candidate.settings,
+              tools: jobTools?.tools,
+              toolChoice: jobTools?.tool_choice,
             }),
           opts.retry,
         );
@@ -144,8 +147,9 @@ export async function processRun(opts: WorkerOptions, runId: string): Promise<vo
         }
 
         const result = call.value;
+        const output = scoredOutput(result);
         await finishEvalSpend(gate, result.cost_usd);
-        const scored = await scoreOutput(ev, result.content, { mustNever, judge });
+        const scored = await scoreOutput(ev, output, { mustNever, judge });
         if (scored.cap_hit) {
           capHit = true;
         }
@@ -165,7 +169,7 @@ export async function processRun(opts: WorkerOptions, runId: string): Promise<vo
           completionTokens: result.completion_tokens ?? null,
           servedModel: result.served_model ?? null,
           attempts: call.attempts,
-          output: result.content,
+          output,
         });
 
         if (gate.exceeded || scored.cap_hit) {

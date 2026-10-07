@@ -2,6 +2,11 @@ import {
   parseOpenRouterModels,
   type CatalogModel,
 } from "./catalog.js";
+import {
+  parseToolArguments,
+  toolCallOutput,
+  type NativeToolCall,
+} from "../scoring/tool-call.js";
 
 /** Model call settings that a candidate can change. */
 export type ModelSettings = {
@@ -14,6 +19,15 @@ export type ModelSettings = {
 /** provider = cost reported by OpenRouter. estimate = token count times a flat rate. */
 export type CostSource = "provider" | "estimate";
 
+/** A tool the job gives the model. parameters is a JSON schema. */
+export type ToolDefinition = {
+  name: string;
+  description?: string;
+  parameters?: Record<string, unknown>;
+};
+
+export type ToolChoice = "auto" | "required" | "none" | { name: string };
+
 export type ChatCompletionResult = {
   content: string;
   time_ms: number;
@@ -22,18 +36,71 @@ export type ChatCompletionResult = {
   prompt_tokens?: number;
   completion_tokens?: number;
   served_model?: string;
+  /** Native tool calls in the reply. arguments is parsed JSON when it parses. */
+  tool_calls?: NativeToolCall[];
+};
+
+export type ChatCompletionInput = {
+  model: string;
+  prompt: string;
+  apiKey: string;
+  systemPrompt?: string;
+  settings?: ModelSettings;
+  tools?: ToolDefinition[];
+  toolChoice?: ToolChoice;
 };
 
 export type OpenRouterClient = {
-  chatCompletion(input: {
-    model: string;
-    prompt: string;
-    apiKey: string;
-    systemPrompt?: string;
-    settings?: ModelSettings;
-  }): Promise<ChatCompletionResult>;
+  chatCompletion(input: ChatCompletionInput): Promise<ChatCompletionResult>;
   listModels?(apiKey: string): Promise<CatalogModel[]>;
 };
+
+/** The output that scorers see: the text, or the tool calls as JSON when the model called a tool. */
+export function scoredOutput(result: ChatCompletionResult): string {
+  return result.tool_calls && result.tool_calls.length > 0
+    ? toolCallOutput(result.content, result.tool_calls)
+    : result.content;
+}
+
+export function toolsBody(
+  tools: ToolDefinition[] | undefined,
+  toolChoice: ToolChoice | undefined,
+): Record<string, unknown> {
+  if (!tools || tools.length === 0) {
+    return {};
+  }
+  const body: Record<string, unknown> = {
+    tools: tools.map((t) => ({
+      type: "function",
+      function: {
+        name: t.name,
+        ...(t.description ? { description: t.description } : {}),
+        parameters: t.parameters ?? { type: "object", properties: {} },
+      },
+    })),
+  };
+  if (toolChoice) {
+    body.tool_choice =
+      typeof toolChoice === "string"
+        ? toolChoice
+        : { type: "function", function: { name: toolChoice.name } };
+  }
+  return body;
+}
+
+function readToolCalls(raw: unknown): NativeToolCall[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const calls: NativeToolCall[] = [];
+  for (const item of raw) {
+    const fn = (item as { function?: { name?: unknown; arguments?: unknown } } | null)?.function;
+    if (fn && typeof fn.name === "string" && fn.name.length > 0) {
+      calls.push({ name: fn.name, arguments: parseToolArguments(fn.arguments) });
+    }
+  }
+  return calls;
+}
 
 const REQUEST_TIMEOUT_MS = 120_000;
 const ESTIMATE_USD_PER_TOKEN = 0.000002;
@@ -95,7 +162,7 @@ export function createOpenRouterClient(
   fetchFn: typeof fetch = fetch,
 ): OpenRouterClient {
   return {
-    async chatCompletion({ model, prompt, apiKey, systemPrompt, settings }) {
+    async chatCompletion({ model, prompt, apiKey, systemPrompt, settings, tools, toolChoice }) {
       const started = Date.now();
       const messages = [
         ...(systemPrompt && systemPrompt.length > 0
@@ -114,6 +181,7 @@ export function createOpenRouterClient(
           model,
           messages,
           ...settingsBody(settings),
+          ...toolsBody(tools, toolChoice),
         }),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
@@ -123,7 +191,7 @@ export function createOpenRouterClient(
       }
       const data = (await res.json()) as {
         model?: string;
-        choices?: Array<{ message?: { content?: string } }>;
+        choices?: Array<{ message?: { content?: string | null; tool_calls?: unknown } }>;
         usage?: {
           cost?: number;
           total_cost?: number;
@@ -131,7 +199,9 @@ export function createOpenRouterClient(
           completion_tokens?: number;
         };
       };
-      const content = data.choices?.[0]?.message?.content ?? "";
+      const message = data.choices?.[0]?.message;
+      const content = message?.content ?? "";
+      const toolCalls = readToolCalls(message?.tool_calls);
       const elapsed = Date.now() - started;
       const promptTokens = data.usage?.prompt_tokens ?? 0;
       const completionTokens = data.usage?.completion_tokens ?? 0;
@@ -148,6 +218,7 @@ export function createOpenRouterClient(
         prompt_tokens: promptTokens,
         completion_tokens: completionTokens,
         served_model: typeof data.model === "string" ? data.model : undefined,
+        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
       };
     },
     listModels(apiKey) {

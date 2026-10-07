@@ -8,10 +8,14 @@ import {
 } from "./registry.js";
 
 type SampleFile = { path: string; content: string };
+type ExpectedToolCall =
+  | { name: string; args?: Record<string, unknown>; required?: string[] }
+  | { none: true };
 type LabeledExample = {
   text: string;
   label: string;
-  expected: { path: string; value?: unknown };
+  expected?: { path: string; value?: unknown };
+  expected_tool_call?: ExpectedToolCall;
 };
 type Evidence = {
   prompts?: Array<{ name?: string; text: string }>;
@@ -281,7 +285,26 @@ function sampleInput(input: DraftPlanInput): string {
 }
 
 function routePath(examples: LabeledExample[]): string {
-  return examples.find((e) => ROUTE_PATHS.has(e.expected.path))?.expected.path ?? "label";
+  return (
+    examples.find((e) => e.expected && ROUTE_PATHS.has(e.expected.path))?.expected?.path ?? "label"
+  );
+}
+
+function toolExampleDraft(example: LabeledExample, expected: ExpectedToolCall): DraftEval {
+  return draft(
+    "tool_call",
+    example.text,
+    example.text,
+    { kind: "tool_args", expected },
+    {
+      form_type: "pass_fail",
+      form_spec: { text: example.text, label: example.label },
+      evidence_json: evidenceSummary("tool_call", {
+        label: example.label,
+        expected_tool: "none" in expected ? null : expected.name,
+      }),
+    },
+  );
 }
 
 function examplesToDrafts(input: DraftPlanInput): DraftEval[] {
@@ -291,8 +314,12 @@ function examplesToDrafts(input: DraftPlanInput): DraftEval[] {
   }
   const routeLike =
     input.archetype_ids?.includes("classification_route") === true ||
-    examples.some((e) => ROUTE_PATHS.has(e.expected.path));
+    examples.some((e) => e.expected && ROUTE_PATHS.has(e.expected.path));
   return examples.map((example) => {
+    if (example.expected_tool_call) {
+      return toolExampleDraft(example, example.expected_tool_call);
+    }
+    const expected = example.expected!;
     const archetypeId = routeLike ? "classification_route" : "extraction_transform";
     return draft(
       archetypeId,
@@ -301,8 +328,8 @@ function examplesToDrafts(input: DraftPlanInput): DraftEval[] {
       {
         kind: "field_equals",
         expected: {
-          path: routeLike ? example.expected.path || routePath(examples) : example.expected.path,
-          value: example.expected.value,
+          path: routeLike ? expected.path || routePath(examples) : expected.path,
+          value: expected.value,
         },
       },
       {
@@ -310,7 +337,7 @@ function examplesToDrafts(input: DraftPlanInput): DraftEval[] {
         form_spec: { text: example.text, label: example.label },
         evidence_json: evidenceSummary(archetypeId, {
           label: example.label,
-          expected_path: example.expected.path,
+          expected_path: expected.path,
         }),
       },
     );

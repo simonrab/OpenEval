@@ -14,6 +14,7 @@ import {
 } from "../eval-set.js";
 import { attachImagePdfFiles } from "../eval-files.js";
 import { newJobId, newProjectId } from "../ids.js";
+import { jobToolsFromInput } from "../job.js";
 import { projectExists } from "../keys.js";
 import { buildAcceptUrl, signAcceptToken } from "../routes/accept.js";
 import {
@@ -272,9 +273,12 @@ export const handleGenerateEvalSuite: ToolHandler = (body, ctx) => {
     const description =
       input.description ??
       JSON.stringify(input.what_good_means);
+    const tools = jobToolsFromInput(input);
     const limits = {
       ...(input.limits ?? {}),
       ...(input.system_prompt ? { system_prompt: input.system_prompt } : {}),
+      ...(tools.length > 0 ? { tools } : {}),
+      ...(tools.length > 0 && input.tool_choice ? { tool_choice: input.tool_choice } : {}),
     };
     const limitsJson =
       Object.keys(limits).length > 0 ? JSON.stringify(limits) : null;

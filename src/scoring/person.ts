@@ -1,5 +1,6 @@
 import type { MarkPayload } from "../mark/forms.js";
 import { trimText } from "../mark/forms.js";
+import { parseToolCalls } from "./tool-call.js";
 
 export function scoreTrustedPersonMark(
   modelOutput: string,
@@ -68,19 +69,21 @@ export function scoreTrustedPersonMark(
       return { passed: true, reason_short: "rubric pass" };
     }
     case "tool": {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(output);
-      } catch {
+      const calls = parseToolCalls(output);
+      if (calls === null) {
         return { passed: false, reason_short: "output not JSON" };
       }
-      const obj = parsed as { name?: string; arguments?: Record<string, unknown> };
-      if (mark.tool && obj.name !== mark.tool.name) {
+      const call = mark.tool ? calls.find((c) => c.name === mark.tool!.name) : calls[0];
+      if (mark.tool && !call) {
         return { passed: false, reason_short: "tool name mismatch" };
       }
+      const args =
+        call?.args && typeof call.args === "object" && !Array.isArray(call.args)
+          ? (call.args as Record<string, unknown>)
+          : {};
       if (mark.tool?.args) {
         for (const [k, v] of Object.entries(mark.tool.args)) {
-          if (JSON.stringify(obj.arguments?.[k]) !== JSON.stringify(v)) {
+          if (JSON.stringify(args[k]) !== JSON.stringify(v)) {
             return { passed: false, reason_short: `arg ${k} mismatch` };
           }
         }

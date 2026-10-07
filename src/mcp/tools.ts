@@ -14,7 +14,7 @@ export type McpToolDefinition = {
 
 const MCP_DESCRIPTIONS: Record<ToolName, string> = {
   generate_eval_suite:
-    "Start here. Write draft evals for one job the user names. If the user gives labeled examples, pass them in labeled_examples. Do not invent examples. Then follow next_action.",
+    "Start here. Write draft evals for one job the user names. If the user gives labeled examples, pass them in labeled_examples. Do not invent examples. If the job calls tools, pass the tool definitions in tools, and use expected_tool_call on each example. Then follow next_action.",
   queue_for_labeling:
     "Queue evals that a person must mark. Show mark_url and stop.",
   get_label_status: "Return mark counts for an eval set.",

@@ -107,6 +107,7 @@ The input can include:
 
 - `description`
 - `system_prompt`
+- `tools` and `tool_choice`
 - `sample_files`
 - `labeled_examples`
 - `what_good_means`
@@ -150,6 +151,33 @@ It reuses person marks from the eval-set version.
 
 Pass `models` (model ids) or `candidates`.
 A candidate is `{ id, model, settings?, system_prompt? }`. The id is the model id or `model#label`.
+
+### Tool calls
+
+A job can give the model tools.
+Pass `tools` to `generate_eval_suite`: `[{ name, description?, parameters? }]`. `parameters` is a JSON schema.
+`tool_choice` is `auto`, `required`, `none`, or `{ "name": "<tool>" }`.
+When `tools` is not set, OpenEval uses `evidence.tool_schemas` that have a valid name.
+
+Each run sends the tools to the model as native function tools.
+When the model calls a tool, the scored output is JSON:
+
+```json
+{ "content": null, "tool_calls": [{ "name": "search_orders", "arguments": { "order_id": "8831" } }] }
+```
+
+A labeled example can state the expected call in place of `expected`:
+
+```json
+{ "text": "Where is order 8831?", "label": "Search",
+  "expected_tool_call": { "name": "search_orders", "args": { "order_id": "8831" } } }
+```
+
+Use `{ "none": true }` when the model must not call a tool.
+Each example becomes a `tool_args` program check.
+`tool_args` finds the call with the expected name, then checks `args` and `required`.
+A default model list skips models that the catalog marks as without tool calling.
+OpenEval sends one turn. It does not run the tool or send the tool result back to the model.
 
 Each eval runs 3 times per candidate by default (`reps`, 1 to 10).
 An eval passes only when every scored rep passes.
