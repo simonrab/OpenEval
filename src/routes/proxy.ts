@@ -19,6 +19,8 @@ import {
   mergeSettings,
   pickSystemPrompt,
 } from "../live/request.js";
+import { emptyArm, recordArmEvent } from "../live/arms.js";
+import { runLiveChecks } from "../live/checks.js";
 
 type ProxyBody = {
   project_id?: unknown;
@@ -179,21 +181,45 @@ export async function registerProxyRoutes(
         prompt,
         apiKey: vendorKey,
       });
+    // Live evidence for this one request, saved before the reply.
+    const evidence = emptyArm(policy.policy_id);
+    evidence.request_count = 1;
+    const startedAt = Date.now();
     let served = policy.primary;
     let result: ChatCompletionResult;
     try {
-      result = await callWith(served);
-    } catch (err) {
-      const backup = policy.backups[0];
-      if (!backup) {
-        throw err;
+      try {
+        result = await callWith(served);
+      } catch (err) {
+        const backup = policy.backups[0];
+        if (!backup) {
+          throw err;
+        }
+        served = backup;
+        result = await callWith(served);
+        evidence.fallback_count = 1;
       }
-      served = backup;
-      result = await callWith(served);
+    } catch (err) {
+      evidence.error_count = 1;
+      recordArmEvent(db, projectId, evidence);
+      throw err;
     }
+    evidence.latency_ms_sum = Date.now() - startedAt;
+    evidence.latency_count = 1;
+    if (result.cost_source === "provider") {
+      evidence.cost_usd_sum = result.cost_usd;
+      evidence.cost_count = 1;
+    }
+    const checks = runLiveChecks(result.content, policy.live_checks ?? []);
+    if (checks.checked) {
+      evidence.quality_checked = 1;
+      evidence.quality_failed = checks.failed.length > 0 ? 1 : 0;
+    }
+    recordArmEvent(db, projectId, evidence);
     const openeval = {
       policy_id: policy.policy_id,
       candidate_id: entryCandidateId(served),
+      failed_checks: checks.failed,
     };
 
     if (body.stream === true) {

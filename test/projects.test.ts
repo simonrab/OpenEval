@@ -63,6 +63,8 @@ describe("npm start", () => {
         PORT: "0",
       },
       stdio: ["ignore", "pipe", "pipe"],
+      // Own process group, so the server that npm starts can be stopped too.
+      detached: true,
     });
 
     let stderr = "";
@@ -78,11 +80,38 @@ describe("npm start", () => {
         `${(err as Error).message}${stderr ? `\nstderr:\n${stderr}` : ""}`,
       );
     } finally {
-      child.kill("SIGTERM");
+      await stopGroup(child);
       rmSync(dir, { recursive: true, force: true });
     }
   });
 });
+
+/**
+ * SIGTERM to npm alone leaves its node child running, which keeps this test
+ * file open forever. Stop the whole group and wait for npm to exit.
+ */
+async function stopGroup(child: ReturnType<typeof spawn>): Promise<void> {
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  try {
+    process.kill(-child.pid, "SIGTERM");
+  } catch {
+    child.kill("SIGTERM");
+  }
+  const timer = setTimeout(() => {
+    try {
+      process.kill(-child.pid!, "SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  }, 5_000);
+  await exited;
+  clearTimeout(timer);
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+}
 
 function waitForFileOrExit(
   child: ReturnType<typeof spawn>,
@@ -91,6 +120,7 @@ function waitForFileOrExit(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
+      clearInterval(interval);
       reject(new Error(`timed out waiting for ${path}`));
     }, timeoutMs);
     const interval = setInterval(() => {

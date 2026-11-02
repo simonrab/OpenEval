@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import { newPolicyId } from "./ids.js";
 import { CANARY_PERCENT, parseCanaryPercent } from "./live/sticky.js";
 import type { ModelSettings } from "./runner/openrouter.js";
+import type { ProgramCheck } from "./eval-set.js";
 
 export const DEFAULT_MAX_WAIT_MS = 30000;
 
@@ -40,6 +41,12 @@ export type UnsignedPolicy = {
   primary: PolicyModel;
   backups: PolicyModel[];
   canary: unknown;
+  /**
+   * Program checks that every answer must pass, taken from the trusted evals.
+   * The SDK and proxy run them on live answers to get a quality signal.
+   * Absent on older policies.
+   */
+  live_checks?: ProgramCheck[];
 };
 
 export type SignedPolicy = UnsignedPolicy & { sig: string };
@@ -162,6 +169,7 @@ export type ProjectLiveState = {
   request_count: number;
   pii_blocked_count: number;
   last_known_loaded_at: string | null;
+  canary_started_at: string | null;
 };
 
 export type RuntimePolicyDocument = {
@@ -199,7 +207,8 @@ export function getProjectLiveState(
               COALESCE(fallback_count, 0) AS fallback_count,
               COALESCE(request_count, 0) AS request_count,
               COALESCE(pii_blocked_count, 0) AS pii_blocked_count,
-              last_known_loaded_at
+              last_known_loaded_at,
+              canary_started_at
        FROM project_live_state
        WHERE project_id = ?`,
     )
@@ -367,11 +376,12 @@ export function activateCanary(
       `UPDATE project_live_state
        SET canary_policy_id = ?,
            canary_percent = ?,
+           canary_started_at = ?,
            rollback_target_policy_id = last_full_policy_id
        WHERE project_id = ?
          AND last_full_policy_id IS NOT NULL`,
     )
-    .run(policyId, CANARY_PERCENT, projectId);
+    .run(policyId, CANARY_PERCENT, new Date().toISOString(), projectId);
   return result.changes > 0;
 }
 

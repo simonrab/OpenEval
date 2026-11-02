@@ -10,9 +10,11 @@ import { OPTIMIZE_INTENT } from "../runner/queue.js";
 import { ErrorCode } from "./types.js";
 import {
   getIdempotentResponse,
+  listMembers,
   storeIdempotentResponse,
 } from "../eval-set.js";
 import { newPolicyId } from "../ids.js";
+import { deriveLiveChecks } from "../live/checks.js";
 import { getJobLimits } from "../job.js";
 import { projectExists } from "../keys.js";
 import {
@@ -227,6 +229,8 @@ export const handleCompilePolicy: ToolHandler = (body, ctx) => {
   const backupSetups = parseCandidates(rec.backup_candidates_json);
   const primary = targetEntry(rec.named_model_id, winner, timeoutMs);
 
+  const liveChecks = deriveLiveChecks(listMembers(db, rec.eval_set_id));
+
   const policyId = newPolicyId();
   const unsigned: UnsignedPolicy = {
     policy_id: policyId,
@@ -242,6 +246,7 @@ export const handleCompilePolicy: ToolHandler = (body, ctx) => {
       targetEntry(id, backupSetups.find((c) => c.id === id), timeoutMs),
     ),
     canary: null,
+    ...(liveChecks.length > 0 ? { live_checks: liveChecks } : {}),
   };
 
   putPolicy(db, apiKey, unsigned);
@@ -259,6 +264,7 @@ export const handleCompilePolicy: ToolHandler = (body, ctx) => {
       settings: primary.settings ?? null,
       has_system_prompt: primary.system_prompt !== undefined,
     },
+    live_check_count: liveChecks.length,
     system_prompt_note: primary.system_prompt ? POLICY_SYSTEM_PROMPT_NOTE : null,
     approve_url: approveUrl,
     live_traffic_changed: false,

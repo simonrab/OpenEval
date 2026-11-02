@@ -28,6 +28,9 @@ import {
   type SampleWhy,
 } from "./redact.js";
 import { readSpoolSamples, removeSpoolSample, writeSpoolSample } from "./spool.js";
+import { addArm, armHasData, emptyArm, type ArmDelta } from "./arms.js";
+import { runLiveChecks } from "./checks.js";
+import type { ProgramCheck } from "../eval-set.js";
 
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_POLL_MS = 30_000;
@@ -71,6 +74,12 @@ export type LiveSdkOptions = {
    * When false the SDK never sends the policy prompt.
    */
   applyPolicySystemPrompt?: boolean;
+  /**
+   * Extra program checks to run on every answer, added to the policy's
+   * live checks. Only checks that need no expected answer run
+   * (json_valid, json_schema, must_not_contain, length_range).
+   */
+  liveChecks?: ProgramCheck[];
 };
 
 export type LiveCompleteInput = {
@@ -89,6 +98,8 @@ export type LiveCompleteResult = {
   candidate_id: string;
   policy_id: string;
   system_prompt_source: SystemPromptSource;
+  /** Live checks this answer failed. Empty when it passed or no checks ran. */
+  failed_checks: string[];
 };
 
 export type LiveStreamToken = {
@@ -110,6 +121,15 @@ export type LiveSdkStats = {
 export type LiveReportMissInput = {
   prompt: string;
   output: string;
+  /** policy_id from the result. Without it, the last policy used is assumed. */
+  policy_id?: string;
+};
+
+export type LiveReportQualityInput = {
+  /** policy_id from the result. */
+  policy_id: string;
+  /** false when a person or app check found the answer bad. */
+  ok: boolean;
 };
 
 export type LiveSdk = {
@@ -117,6 +137,8 @@ export type LiveSdk = {
   complete(input: LiveCompleteInput): Promise<LiveCompleteResult>;
   completeStream(input: LiveCompleteInput): AsyncIterable<LiveStreamToken>;
   reportMiss(input: LiveReportMissInput): Promise<void>;
+  /** Adds one quality result (for example, a thumbs up or down) for a policy. */
+  reportQuality(input: LiveReportQualityInput): void;
   stats(): LiveSdkStats;
   stop(): void;
 };
@@ -341,6 +363,50 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
   let lastCandidateId: string | null = null;
   let lastPolicyId: string | null = null;
   let lastKnownLoadedAt: string | null = null;
+  /** Change per policy since the last stats upload. */
+  let arms = new Map<string, ArmDelta>();
+
+  function nowMs(): number {
+    return options.now?.() ?? Date.now();
+  }
+
+  function arm(policyId: string): ArmDelta {
+    let found = arms.get(policyId);
+    if (!found) {
+      found = emptyArm(policyId);
+      arms.set(policyId, found);
+    }
+    return found;
+  }
+
+  /** Checks for one policy: the signed policy's checks plus the app's. */
+  function checksFor(policy: SignedPolicy): ProgramCheck[] {
+    return [...(policy.live_checks ?? []), ...(options.liveChecks ?? [])];
+  }
+
+  /** Records latency, cost, and live check results for one served answer. */
+  function noteAnswer(
+    policy: SignedPolicy,
+    content: string,
+    startedAt: number,
+    costUsd: number | null,
+  ): string[] {
+    const a = arm(policy.policy_id);
+    a.latency_ms_sum += Math.max(0, nowMs() - startedAt);
+    a.latency_count += 1;
+    if (costUsd !== null) {
+      a.cost_usd_sum += costUsd;
+      a.cost_count += 1;
+    }
+    const result = runLiveChecks(content, checksFor(policy));
+    if (result.checked) {
+      a.quality_checked += 1;
+      if (result.failed.length > 0) {
+        a.quality_failed += 1;
+      }
+    }
+    return result.failed;
+  }
 
   function applyDocument(doc: RuntimePolicyDocument): void {
     lastFull = doc.last_full;
@@ -364,6 +430,7 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
 
   function noteRequest(input: LiveCompleteInput, used: SignedPolicy): void {
     requestCount += 1;
+    arm(used.policy_id).request_count += 1;
     lastPolicyId = used.policy_id;
     if (stickyId(input) !== null) {
       hashedRequestCount += 1;
@@ -410,6 +477,10 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
     const redacted = redactSampleFields(args.prompt, args.output);
     if (!redacted.ok) {
       piiBlockedCount += 1;
+      if (args.why === "app_reported") {
+        // The sample is not sent, so count the miss here instead.
+        arm(args.policyId).pii_blocked_miss_count += 1;
+      }
       return;
     }
     const sample: LiveSample = {
@@ -467,9 +538,17 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
   }
 
   async function uploadHopStats(): Promise<void> {
-    if (requestCount === 0) {
+    const pending = [...arms.values()].filter(armHasData);
+    if (requestCount === 0 && pending.length === 0) {
       return;
     }
+    // Send the change since the last upload. On failure, add it back.
+    arms = new Map();
+    const restore = () => {
+      for (const sent of pending) {
+        addArm(arm(sent.policy_id), sent);
+      }
+    };
     try {
       const res = await fetchFn(hopStatsUrl, {
         method: "POST",
@@ -488,12 +567,18 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
           policy_id: lastPolicyId,
           model_id: lastModelId,
           candidate_id: lastCandidateId,
+          ...(pending.length > 0 ? { arms: pending } : {}),
         }),
       });
       if (!res.ok) {
         await cancelBody(res);
+        // A 4xx means the body is bad and will stay bad. Drop it.
+        if (res.status >= 500) {
+          restore();
+        }
       }
     } catch {
+      restore();
       return;
     }
   }
@@ -606,7 +691,7 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
     model: PolicyModel,
     input: LiveCompleteInput,
     policyId: string,
-  ): Promise<LiveCompleteResult> {
+  ): Promise<LiveCompleteResult & { cost_usd: number | null }> {
     const deadline = startDeadline(model.timeout_ms);
     const request = vendorBody(model, input, false);
     try {
@@ -617,14 +702,21 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
       }
       const data = (await res.json()) as {
         choices?: Array<{ message?: { content?: string } }>;
+        usage?: { cost?: number; total_cost?: number };
       };
       const content = data.choices?.[0]?.message?.content ?? "";
+      const reported = data.usage?.cost ?? data.usage?.total_cost;
       return {
         content,
         model_id: model.model_id,
         candidate_id: entryCandidateId(model),
         policy_id: policyId,
         system_prompt_source: request.source,
+        failed_checks: [],
+        cost_usd:
+          typeof reported === "number" && Number.isFinite(reported) && reported >= 0
+            ? reported
+            : null,
       };
     } catch (err) {
       if (err instanceof VendorError) {
@@ -711,23 +803,35 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
     async complete(input) {
       const cached = pickPolicy(input);
       noteRequest(input, cached);
-      try {
-        const result = await completeJson(cached.primary, input, cached.policy_id);
+      const startedAt = nowMs();
+      const finish = (
+        result: LiveCompleteResult & { cost_usd: number | null },
+      ): LiveCompleteResult => {
         noteServed(result);
-        return result;
+        const { cost_usd, ...rest } = result;
+        return {
+          ...rest,
+          failed_checks: noteAnswer(cached, result.content, startedAt, cost_usd),
+        };
+      };
+      try {
+        return finish(await completeJson(cached.primary, input, cached.policy_id));
       } catch (err) {
         const backup = oneBackup(cached);
         queueFromError(input.prompt, err, cached.primary, cached.policy_id);
         if (!backup || !isRetryableVendor(err)) {
+          arm(cached.policy_id).error_count += 1;
           throw err;
         }
         fallbackCount += 1;
         try {
-          const result = await completeJson(backup, input, cached.policy_id);
-          noteServed(result);
-          return result;
+          const served = await completeJson(backup, input, cached.policy_id);
+          // Counted only once the backup answered. A failed backup is an error.
+          arm(cached.policy_id).fallback_count += 1;
+          return finish(served);
         } catch (backupErr) {
           queueFromError(input.prompt, backupErr, backup, cached.policy_id);
+          arm(cached.policy_id).error_count += 1;
           throw backupErr;
         }
       }
@@ -736,27 +840,44 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
     async *completeStream(input) {
       const cached = pickPolicy(input);
       noteRequest(input, cached);
+      const startedAt = nowMs();
       let sawToken = false;
+      let text = "";
       try {
         for await (const token of streamModel(cached.primary, input, cached.policy_id)) {
           sawToken = true;
           noteServed(token);
+          text += token.content;
           yield token;
         }
+        // Streams carry no cost, so only latency and checks are recorded.
+        noteAnswer(cached, text, startedAt, null);
       } catch (err) {
         const backup = oneBackup(cached);
         queueFromError(input.prompt, err, cached.primary, cached.policy_id);
         if (sawToken || !backup || !isRetryableVendor(err)) {
+          arm(cached.policy_id).error_count += 1;
           throw err;
         }
         fallbackCount += 1;
+        text = "";
+        let backupStarted = false;
         try {
           for await (const token of streamModel(backup, input, cached.policy_id)) {
+            if (!backupStarted) {
+              backupStarted = true;
+              arm(cached.policy_id).fallback_count += 1;
+            }
             noteServed(token);
+            text += token.content;
             yield token;
           }
+          noteAnswer(cached, text, startedAt, null);
         } catch (backupErr) {
           queueFromError(input.prompt, backupErr, backup, cached.policy_id);
+          if (!backupStarted) {
+            arm(cached.policy_id).error_count += 1;
+          }
           throw backupErr;
         }
       }
@@ -773,8 +894,16 @@ export function createLiveSdk(options: LiveSdkOptions): LiveSdk {
         why: "app_reported",
         modelId: lastModelId ?? cached.primary.model_id,
         candidateId: lastCandidateId ?? entryCandidateId(cached.primary),
-        policyId: lastPolicyId ?? cached.policy_id,
+        policyId: input.policy_id ?? lastPolicyId ?? cached.policy_id,
       });
+    },
+
+    reportQuality(input) {
+      const a = arm(input.policy_id);
+      a.quality_checked += 1;
+      if (!input.ok) {
+        a.quality_failed += 1;
+      }
     },
 
     stats() {

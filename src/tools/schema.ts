@@ -601,6 +601,13 @@ const automationGuardRulesSchema = z
     require_provider_cost: z.boolean().optional(),
     max_fallback_rate: z.number().min(0).max(1).optional(),
     max_miss_rate: z.number().min(0).max(1).optional(),
+    max_error_rate: z.number().min(0).max(1).optional(),
+    max_quality_fail_rate: z.number().min(0).max(1).optional(),
+    max_rate_increase: z.number().min(0).max(1).optional(),
+    max_latency_increase: z.number().min(0).optional(),
+    max_cost_increase: z.number().min(0).optional(),
+    min_rollback_requests: z.number().int().min(1).optional(),
+    stats_window_s: z.number().int().min(60).optional(),
     min_canary_age_s: z.number().int().min(0).optional(),
     min_canary_requests: z.number().int().min(0).optional(),
     sample_flood_limit: z.number().int().min(0).optional(),
@@ -991,6 +998,8 @@ export const compilePolicyOutputSchema = z
         has_system_prompt: z.boolean(),
       })
       .strict(),
+    /** Program checks the SDK and proxy run on every live answer. */
+    live_check_count: z.number().int().min(0),
     system_prompt_note: z.string().nullable(),
     approve_url: z.string(),
     live_traffic_changed: z.literal(false),
@@ -1023,6 +1032,36 @@ export const proposeRolloutOutputSchema = z
     to_candidate_id: z.string().nullable(),
     live_traffic_changed: z.literal(false),
     next_action: nextActionSchema,
+  })
+  .strict();
+
+const armStatsSchema = z
+  .object({
+    policy_id: z.string(),
+    since: z.string(),
+    request_count: z.number().int(),
+    fallback_count: z.number().int(),
+    error_count: z.number().int(),
+    miss_count: z.number().int(),
+    quality_checked: z.number().int(),
+    quality_failed: z.number().int(),
+    latency_count: z.number().int(),
+    cost_count: z.number().int(),
+    fallback_rate: z.number().nullable(),
+    error_rate: z.number().nullable(),
+    miss_rate: z.number().nullable(),
+    quality_fail_rate: z.number().nullable(),
+    avg_latency_ms: z.number().nullable(),
+    avg_cost_usd: z.number().nullable(),
+  })
+  .strict();
+
+/** Canary and full policy live evidence over the same recent window. */
+const canaryEvidenceSchema = z
+  .object({
+    since: z.string(),
+    canary: armStatsSchema,
+    control: armStatsSchema.nullable(),
   })
   .strict();
 
@@ -1070,6 +1109,7 @@ export const getLiveReportOutputSchema = z
     blocked_reason: z.string().nullable(),
     decision_ids: z.array(z.string()),
     audit_ids: z.array(z.string()),
+    canary_evidence: canaryEvidenceSchema.nullable(),
     live_traffic_changed: z.literal(false),
     next_action: nextActionSchema,
   })

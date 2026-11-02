@@ -19,6 +19,7 @@ import {
   type SignedPolicy,
 } from "../policy.js";
 import { entryCandidateId } from "../live/request.js";
+import { armStats, canaryHealthReason, type ArmStats } from "../live/arms.js";
 import { baseModelId } from "../runner/candidates.js";
 import {
   listSampleGroups,
@@ -63,6 +64,20 @@ export type AutomationConfig = {
   require_provider_cost: boolean;
   max_fallback_rate: number;
   max_miss_rate: number;
+  /** Most canary requests that may get no answer at all. */
+  max_error_rate: number;
+  /** Most canary answers that may fail a live check. */
+  max_quality_fail_rate: number;
+  /** Most a canary rate may rise over the full policy (absolute). */
+  max_rate_increase: number;
+  /** Most canary average latency may rise over the full policy (0.5 = 50 percent). */
+  max_latency_increase: number;
+  /** Most canary average cost may rise over the full policy (0.5 = 50 percent). */
+  max_cost_increase: number;
+  /** Fewest canary requests before a rate can trigger a rollback. */
+  min_rollback_requests: number;
+  /** Longest look-back for live evidence, in seconds. */
+  stats_window_s: number;
   min_canary_age_s: number;
   min_canary_requests: number;
   sample_flood_limit: number;
@@ -97,8 +112,15 @@ const DEFAULT_CONFIG: Omit<AutomationConfig, "project_id" | "automation_id"> = {
   require_provider_cost: false,
   max_fallback_rate: 0.05,
   max_miss_rate: 0.01,
-  min_canary_age_s: 0,
-  min_canary_requests: 1,
+  max_error_rate: 0.02,
+  max_quality_fail_rate: 0.05,
+  max_rate_increase: 0.02,
+  max_latency_increase: 0.5,
+  max_cost_increase: 0.5,
+  min_rollback_requests: 20,
+  stats_window_s: 86_400,
+  min_canary_age_s: 1_800,
+  min_canary_requests: 200,
   sample_flood_limit: 100,
   expires_at: null,
   kill_switch: false,
@@ -133,6 +155,9 @@ export function getAutomationConfig(
               auto_rollback, allowed_models_json, max_eval_spend_usd,
               min_eval_pass_rate, min_pass_rate_low, require_provider_cost,
               max_fallback_rate, max_miss_rate,
+              max_error_rate, max_quality_fail_rate, max_rate_increase,
+              max_latency_increase, max_cost_increase,
+              min_rollback_requests, stats_window_s,
               min_canary_age_s, min_canary_requests, sample_flood_limit,
               expires_at, kill_switch, frozen
        FROM live_automation
@@ -153,6 +178,13 @@ export function getAutomationConfig(
         require_provider_cost: number | null;
         max_fallback_rate: number;
         max_miss_rate: number;
+        max_error_rate: number | null;
+        max_quality_fail_rate: number | null;
+        max_rate_increase: number | null;
+        max_latency_increase: number | null;
+        max_cost_increase: number | null;
+        min_rollback_requests: number | null;
+        stats_window_s: number | null;
         min_canary_age_s: number;
         min_canary_requests: number;
         sample_flood_limit: number;
@@ -178,6 +210,16 @@ export function getAutomationConfig(
     require_provider_cost: toBool(row.require_provider_cost),
     max_fallback_rate: row.max_fallback_rate,
     max_miss_rate: row.max_miss_rate,
+    max_error_rate: row.max_error_rate ?? DEFAULT_CONFIG.max_error_rate,
+    max_quality_fail_rate:
+      row.max_quality_fail_rate ?? DEFAULT_CONFIG.max_quality_fail_rate,
+    max_rate_increase: row.max_rate_increase ?? DEFAULT_CONFIG.max_rate_increase,
+    max_latency_increase:
+      row.max_latency_increase ?? DEFAULT_CONFIG.max_latency_increase,
+    max_cost_increase: row.max_cost_increase ?? DEFAULT_CONFIG.max_cost_increase,
+    min_rollback_requests:
+      row.min_rollback_requests ?? DEFAULT_CONFIG.min_rollback_requests,
+    stats_window_s: row.stats_window_s ?? DEFAULT_CONFIG.stats_window_s,
     min_canary_age_s: row.min_canary_age_s,
     min_canary_requests: row.min_canary_requests,
     sample_flood_limit: row.sample_flood_limit,
@@ -199,6 +241,13 @@ function guardRules(config: AutomationConfig): Record<string, unknown> {
     require_provider_cost: config.require_provider_cost,
     max_fallback_rate: config.max_fallback_rate,
     max_miss_rate: config.max_miss_rate,
+    max_error_rate: config.max_error_rate,
+    max_quality_fail_rate: config.max_quality_fail_rate,
+    max_rate_increase: config.max_rate_increase,
+    max_latency_increase: config.max_latency_increase,
+    max_cost_increase: config.max_cost_increase,
+    min_rollback_requests: config.min_rollback_requests,
+    stats_window_s: config.stats_window_s,
     min_canary_age_s: config.min_canary_age_s,
     min_canary_requests: config.min_canary_requests,
     sample_flood_limit: config.sample_flood_limit,
@@ -506,8 +555,92 @@ function blockedCycle(
   return cycleOutput(row, config);
 }
 
-function safetyStats(config: AutomationConfig, fallbackRate: number) {
-  if (fallbackRate > config.max_fallback_rate) {
+/**
+ * Why a healthy canary may not be promoted yet, or null.
+ * The canary must be old enough and have enough of its own traffic.
+ */
+function promotionGateReason(
+  config: AutomationConfig,
+  evidence: CanaryEvidence | null,
+  canaryStartedAt: string | null,
+  nowMs: number,
+): string | null {
+  if (config.min_canary_age_s > 0) {
+    const started = canaryStartedAt ? Date.parse(canaryStartedAt) : Number.NaN;
+    if (!Number.isFinite(started)) {
+      return "canary_age_unknown";
+    }
+    if (nowMs - started < config.min_canary_age_s * 1000) {
+      return "canary_age_low";
+    }
+  }
+  if (!evidence || evidence.canary.request_count === 0) {
+    return "canary_stats_missing";
+  }
+  if (evidence.canary.request_count < config.min_canary_requests) {
+    return "canary_traffic_low";
+  }
+  return null;
+}
+
+/** Start of the live evidence window: canary start, but no older than the window. */
+function evidenceSince(
+  config: AutomationConfig,
+  canaryStartedAt: string | null,
+  nowMs: number,
+): string {
+  const windowStart = nowMs - config.stats_window_s * 1000;
+  const started = canaryStartedAt ? Date.parse(canaryStartedAt) : Number.NaN;
+  const since = Number.isFinite(started) ? Math.max(started, windowStart) : windowStart;
+  return new Date(since).toISOString();
+}
+
+export type CanaryEvidence = {
+  since: string;
+  canary: ArmStats;
+  control: ArmStats | null;
+};
+
+/** Live evidence for the canary and the full policy over the same window. */
+export function canaryEvidence(
+  db: Database.Database,
+  config: AutomationConfig,
+  live: {
+    project_id: string;
+    canary_policy_id: string | null;
+    last_full_policy_id: string | null;
+    canary_started_at: string | null;
+  },
+  nowMs: number = Date.now(),
+): CanaryEvidence | null {
+  if (!live.canary_policy_id) {
+    return null;
+  }
+  const since = evidenceSince(config, live.canary_started_at, nowMs);
+  return {
+    since,
+    canary: armStats(db, live.project_id, live.canary_policy_id, since),
+    control: live.last_full_policy_id
+      ? armStats(db, live.project_id, live.last_full_policy_id, since)
+      : null,
+  };
+}
+
+/**
+ * Why the canary should be rolled back, or null.
+ * With per-policy evidence, the canary is judged on its own traffic and
+ * compared with the full policy. With only old project-wide stats (an SDK
+ * that predates per-policy stats), the old fallback check still applies.
+ */
+function safetyStats(
+  config: AutomationConfig,
+  evidence: CanaryEvidence | null,
+  legacyFallbackRate: number,
+): string | null {
+  if (evidence && evidence.canary.request_count > 0) {
+    return canaryHealthReason(evidence.canary, evidence.control, config);
+  }
+  if (legacyFallbackRate > config.max_fallback_rate) {
     return "fallback_rate_high";
   }
   return null;
@@ -521,6 +654,7 @@ export function buildLiveAutomationReport(
   const row = latestCycle(db, projectId);
   const decisionIds = row ? parseJsonArray(row.decision_ids_json) : [];
   const auditIds = row ? parseJsonArray(row.audit_ids_json) : [];
+  const live = getProjectLiveState(db, projectId);
   return {
     automation_mode: config.mode,
     last_cycle: row
@@ -534,6 +668,7 @@ export function buildLiveAutomationReport(
     blocked_reason: row?.blocked_reason ?? null,
     decision_ids: decisionIds,
     audit_ids: auditIds,
+    canary_evidence: live ? canaryEvidence(db, config, live) : null,
   };
 }
 
@@ -571,9 +706,13 @@ export const handleConfigureLiveAutomation: ToolHandler = (body, ctx) => {
        auto_rollback, allowed_models_json, max_eval_spend_usd,
        min_eval_pass_rate, min_pass_rate_low, require_provider_cost,
        max_fallback_rate, max_miss_rate,
+       max_error_rate, max_quality_fail_rate, max_rate_increase,
+       max_latency_increase, max_cost_increase,
+       min_rollback_requests, stats_window_s,
        min_canary_age_s, min_canary_requests, sample_flood_limit,
        expires_at, kill_switch, frozen, approved_by, configured_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+               ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_id) DO UPDATE SET
        automation_id = excluded.automation_id,
        mode = excluded.mode,
@@ -587,6 +726,13 @@ export const handleConfigureLiveAutomation: ToolHandler = (body, ctx) => {
        require_provider_cost = excluded.require_provider_cost,
        max_fallback_rate = excluded.max_fallback_rate,
        max_miss_rate = excluded.max_miss_rate,
+       max_error_rate = excluded.max_error_rate,
+       max_quality_fail_rate = excluded.max_quality_fail_rate,
+       max_rate_increase = excluded.max_rate_increase,
+       max_latency_increase = excluded.max_latency_increase,
+       max_cost_increase = excluded.max_cost_increase,
+       min_rollback_requests = excluded.min_rollback_requests,
+       stats_window_s = excluded.stats_window_s,
        min_canary_age_s = excluded.min_canary_age_s,
        min_canary_requests = excluded.min_canary_requests,
        sample_flood_limit = excluded.sample_flood_limit,
@@ -609,6 +755,13 @@ export const handleConfigureLiveAutomation: ToolHandler = (body, ctx) => {
     rules.require_provider_cost === true ? 1 : 0,
     rules.max_fallback_rate ?? DEFAULT_CONFIG.max_fallback_rate,
     rules.max_miss_rate ?? DEFAULT_CONFIG.max_miss_rate,
+    rules.max_error_rate ?? DEFAULT_CONFIG.max_error_rate,
+    rules.max_quality_fail_rate ?? DEFAULT_CONFIG.max_quality_fail_rate,
+    rules.max_rate_increase ?? DEFAULT_CONFIG.max_rate_increase,
+    rules.max_latency_increase ?? DEFAULT_CONFIG.max_latency_increase,
+    rules.max_cost_increase ?? DEFAULT_CONFIG.max_cost_increase,
+    rules.min_rollback_requests ?? DEFAULT_CONFIG.min_rollback_requests,
+    rules.stats_window_s ?? DEFAULT_CONFIG.stats_window_s,
     rules.min_canary_age_s ?? DEFAULT_CONFIG.min_canary_age_s,
     rules.min_canary_requests ?? DEFAULT_CONFIG.min_canary_requests,
     rules.sample_flood_limit ?? DEFAULT_CONFIG.sample_flood_limit,
@@ -771,9 +924,10 @@ export const handleRunLiveDecisionCycle: ToolHandler = (body, ctx) => {
 
   const live = getProjectLiveState(db, input.project_id);
   const requestCount = live?.request_count ?? 0;
-  const fallbackRate =
+  const legacyFallbackRate =
     requestCount === 0 ? 0 : (live?.fallback_count ?? 0) / requestCount;
-  const safetyReason = safetyStats(config, fallbackRate);
+  const evidence = live ? canaryEvidence(db, config, live) : null;
+  const safetyReason = safetyStats(config, evidence, legacyFallbackRate);
   if (
     live?.canary_policy_id &&
     config.auto_rollback &&
@@ -790,6 +944,7 @@ export const handleRunLiveDecisionCycle: ToolHandler = (body, ctx) => {
           candidate_id: policySetupId(db, target),
           from_candidate_id: policySetupId(db, live.canary_policy_id),
           reason: safetyReason,
+          evidence,
         },
       });
       const row = insertCycle(db, {
@@ -859,10 +1014,14 @@ export const handleRunLiveDecisionCycle: ToolHandler = (body, ctx) => {
       );
       return { status: 200, body: output };
     }
-    if (requestCount < config.min_canary_requests) {
+    // An unhealthy canary is never promoted, even when auto rollback is off.
+    const promoteBlock =
+      safetyReason ??
+      promotionGateReason(config, evidence, live.canary_started_at, Date.now());
+    if (promoteBlock !== null) {
       const output = blockedCycle(db, config, {
         cycle_id: cycleId,
-        reason: "canary_traffic_low",
+        reason: promoteBlock,
         audit_ids: auditIds,
         started_at: startedAt,
       });
@@ -891,6 +1050,7 @@ export const handleRunLiveDecisionCycle: ToolHandler = (body, ctx) => {
           policy_id: live.canary_policy_id,
           candidate_id: policySetupId(db, live.canary_policy_id),
           from_candidate_id: policySetupId(db, live.last_full_policy_id),
+          evidence,
         },
       });
       const row = insertCycle(db, {

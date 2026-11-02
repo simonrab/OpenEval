@@ -217,6 +217,55 @@ It can roll back to the last full policy.
 Rollback has priority over promotion.
 Manual mode never changes live policy.
 
+#### How a canary is judged
+
+The SDK and proxy keep live numbers for each policy.
+They send the change since the last report, so many app servers add up.
+The cycle compares the canary with the full policy over the same recent window.
+The window starts when the canary started and is never longer than `stats_window_s`.
+
+The numbers are:
+
+- **Errors:** requests where no model answered.
+- **Fallbacks:** requests where a backup answered.
+- **Misses:** answers the app reported with `reportMiss`.
+- **Quality:** answers that failed a live check, plus `reportQuality` results.
+- **Latency** and **cost** per answer. Cost counts only when the provider reports it.
+
+Live checks come from the trusted evals.
+`compile_policy` copies program checks from `output_contract` and `safety_policy` evals
+into the signed policy when the check fits any answer:
+`json_valid`, `json_schema`, `must_not_contain`, and `length_range`.
+The SDK and proxy run them on every answer.
+The app can add its own with the SDK option `liveChecks`.
+
+The canary rolls back when one of these is true:
+
+- A rate is over its limit: `max_error_rate`, `max_fallback_rate`, `max_miss_rate`, `max_quality_fail_rate`.
+- A rate is worse than the full policy by more than `max_rate_increase`, and the gap is clear at 95 percent.
+- Average latency or cost is higher than the full policy by more than `max_latency_increase` or `max_cost_increase`.
+
+No rule acts until the canary has `min_rollback_requests` requests.
+A canary goes to full only when it is healthy, is at least `min_canary_age_s` old,
+and has `min_canary_requests` requests of its own.
+An unhealthy canary is never promoted, even with `auto_rollback` off.
+
+| Guard rule | Default |
+| --- | --- |
+| `max_error_rate` | 0.02 |
+| `max_fallback_rate` | 0.05 |
+| `max_miss_rate` | 0.01 |
+| `max_quality_fail_rate` | 0.05 |
+| `max_rate_increase` | 0.02 |
+| `max_latency_increase` | 0.5 |
+| `max_cost_increase` | 0.5 |
+| `min_rollback_requests` | 20 |
+| `min_canary_requests` | 200 |
+| `min_canary_age_s` | 1800 |
+| `stats_window_s` | 86400 |
+
+`get_live_report` shows the canary and full policy numbers in `canary_evidence`.
+
 The policy holds the full winning setup for the primary and each backup:
 the base model, the settings, and the system prompt.
 The SDK and proxy send the base model id with those settings.

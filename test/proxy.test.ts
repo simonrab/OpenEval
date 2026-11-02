@@ -110,6 +110,40 @@ describe("optional proxy runtime", () => {
     }
   }
 
+  it("records live evidence for the policy it served", async () => {
+    const user = canaryUser();
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/proxy/chat/completions",
+      headers: authHeaders(projectId),
+      payload: { messages: [{ role: "user", content: "Say hello." }], user },
+    });
+    assert.equal(res.statusCode, 200);
+    const served = (res.json() as { openeval: { policy_id: string; failed_checks: string[] } })
+      .openeval;
+    assert.deepEqual(served.failed_checks, []);
+    const db = openDb(sqlitePath);
+    try {
+      const rows = db
+        .prepare(
+          "SELECT policy_id, request_count, error_count, latency_count, cost_count FROM runtime_arm_events WHERE project_id = ?",
+        )
+        .all(projectId) as Array<Record<string, unknown>>;
+      assert.deepEqual(rows, [
+        {
+          policy_id: served.policy_id,
+          request_count: 1,
+          error_count: 0,
+          latency_count: 1,
+          // The mock reports no provider cost, so cost is left out.
+          cost_count: 0,
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("streams OpenAI-compatible SSE chunks", async () => {
     const user = canaryUser();
     const res = await app.inject({

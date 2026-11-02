@@ -422,4 +422,261 @@ describe("Guarded Autopilot V2", () => {
     assert.equal(body.blocked_reason, "no_action");
     assert.ok(body.audit_ids.length > 0);
   });
+
+  type Arm = {
+    policy_id: string;
+    request_count?: number;
+    fallback_count?: number;
+    error_count?: number;
+    pii_blocked_miss_count?: number;
+    latency_ms_sum?: number;
+    latency_count?: number;
+    cost_usd_sum?: number;
+    cost_count?: number;
+    quality_checked?: number;
+    quality_failed?: number;
+  };
+
+  async function postArms(arms: Arm[]): Promise<void> {
+    const full = arms.map((a) => ({
+      request_count: 0,
+      fallback_count: 0,
+      error_count: 0,
+      pii_blocked_miss_count: 0,
+      latency_ms_sum: 0,
+      latency_count: 0,
+      cost_usd_sum: 0,
+      cost_count: 0,
+      quality_checked: 0,
+      quality_failed: 0,
+      ...a,
+    }));
+    const total = full.reduce((n, a) => n + a.request_count, 0);
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/runtime/stats",
+      headers: authHeaders(),
+      payload: {
+        project_id: projectId,
+        hashed_request_count: total,
+        canary_request_count: 0,
+        fallback_count: 0,
+        request_count: total,
+        arms: full,
+      },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+  }
+
+  /** Moves the canary start into the past so the age gate can pass. */
+  function ageCanary(seconds: number): void {
+    const db = openDb(sqlitePath);
+    try {
+      db.prepare(
+        "UPDATE project_live_state SET canary_started_at = ? WHERE project_id = ?",
+      ).run(new Date(Date.now() - seconds * 1000).toISOString(), projectId);
+    } finally {
+      db.close();
+    }
+  }
+
+  async function startCanary(
+    rules: Record<string, unknown>,
+    key: string,
+  ): Promise<{ lastFullId: string; draftId: string }> {
+    const seeded = seedLastFullAndDraft();
+    await configure(
+      {
+        auto_canary: true,
+        auto_full: true,
+        auto_rollback: true,
+        allowed_models: [draftModel],
+        ...rules,
+      },
+      `cfg-${key}`,
+    );
+    assert.equal((await runCycle(`cycle-${key}-canary`)).pending_action, "auto_canary");
+    return seeded;
+  }
+
+  it("rolls back a canary with bad fallbacks even when project traffic looks fine", async () => {
+    const seeded = await startCanary({ max_fallback_rate: 0.05 }, "arm-fallback");
+    // 1000 good full-policy requests hide 10 canary fallbacks in a project-wide rate.
+    await postArms([
+      { policy_id: seeded.lastFullId, request_count: 1000 },
+      { policy_id: seeded.draftId, request_count: 50, fallback_count: 10 },
+    ]);
+    const cycle = await runCycle("cycle-arm-fallback");
+    assert.equal(cycle.pending_action, "auto_rollback");
+    const doc = await getPolicy();
+    assert.equal(doc.canary, null);
+    assert.equal(doc.last_full?.policy_id, seeded.lastFullId);
+  });
+
+  it("rolls back when the canary miss rate is over max_miss_rate", async () => {
+    const seeded = await startCanary({ max_miss_rate: 0.01 }, "arm-miss");
+    await postArms([
+      { policy_id: seeded.lastFullId, request_count: 100 },
+      { policy_id: seeded.draftId, request_count: 40, pii_blocked_miss_count: 2 },
+    ]);
+    const cycle = await runCycle("cycle-arm-miss");
+    assert.equal(cycle.pending_action, "auto_rollback");
+    const db = openDb(sqlitePath);
+    try {
+      const row = db
+        .prepare(
+          "SELECT body_json FROM decision_audit_events WHERE project_id = ? AND event_type = 'auto_rollback'",
+        )
+        .get(projectId) as { body_json: string };
+      assert.equal((JSON.parse(row.body_json) as { reason: string }).reason, "miss_rate_high");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rolls back when canary answers fail live checks more than the full policy", async () => {
+    const seeded = await startCanary({ max_quality_fail_rate: 0.5 }, "arm-quality");
+    await postArms([
+      { policy_id: seeded.lastFullId, request_count: 400, quality_checked: 400, quality_failed: 4 },
+      { policy_id: seeded.draftId, request_count: 200, quality_checked: 200, quality_failed: 30 },
+    ]);
+    const cycle = await runCycle("cycle-arm-quality");
+    assert.equal(cycle.pending_action, "auto_rollback");
+  });
+
+  it("rolls back when the canary is much slower or costlier", async () => {
+    const slow = await startCanary({}, "arm-latency");
+    await postArms([
+      { policy_id: slow.lastFullId, request_count: 100, latency_ms_sum: 100 * 400, latency_count: 100 },
+      { policy_id: slow.draftId, request_count: 100, latency_ms_sum: 100 * 900, latency_count: 100 },
+    ]);
+    assert.equal((await runCycle("cycle-arm-latency")).pending_action, "auto_rollback");
+  });
+
+  it("rolls back when the canary costs much more per answer", async () => {
+    const seeded = await startCanary({}, "arm-cost");
+    await postArms([
+      { policy_id: seeded.lastFullId, request_count: 100, cost_usd_sum: 0.1, cost_count: 100 },
+      { policy_id: seeded.draftId, request_count: 100, cost_usd_sum: 0.3, cost_count: 100 },
+    ]);
+    assert.equal((await runCycle("cycle-arm-cost")).pending_action, "auto_rollback");
+  });
+
+  it("does not roll back on a small noisy canary sample", async () => {
+    const seeded = await startCanary({ min_canary_requests: 1000 }, "arm-noise");
+    await postArms([
+      { policy_id: seeded.lastFullId, request_count: 1000, fallback_count: 10 },
+      { policy_id: seeded.draftId, request_count: 10, fallback_count: 1 },
+    ]);
+    const cycle = await runCycle("cycle-arm-noise");
+    assert.equal(cycle.status, "blocked");
+    assert.equal(cycle.blocked_reason, "canary_age_low");
+    assert.equal((await getPolicy()).canary?.policy_id, seeded.draftId);
+  });
+
+  it("waits for the canary age before full rollout", async () => {
+    const seeded = await startCanary({ min_canary_requests: 10 }, "arm-age");
+    await postArms([{ policy_id: seeded.draftId, request_count: 50 }]);
+    const cycle = await runCycle("cycle-arm-age");
+    assert.equal(cycle.blocked_reason, "canary_age_low");
+    assert.equal((await getPolicy()).canary?.policy_id, seeded.draftId);
+  });
+
+  it("counts canary traffic, not project traffic, before full rollout", async () => {
+    const seeded = await startCanary({ min_canary_age_s: 0, min_canary_requests: 200 }, "arm-traffic");
+    await postArms([
+      { policy_id: seeded.lastFullId, request_count: 5000 },
+      { policy_id: seeded.draftId, request_count: 50 },
+    ]);
+    const cycle = await runCycle("cycle-arm-traffic");
+    assert.equal(cycle.blocked_reason, "canary_traffic_low");
+  });
+
+  it("blocks full rollout when only old project-wide stats exist", async () => {
+    await startCanary({ min_canary_age_s: 0 }, "arm-legacy");
+    await postStats(0, 5000);
+    const cycle = await runCycle("cycle-arm-legacy");
+    assert.equal(cycle.blocked_reason, "canary_stats_missing");
+  });
+
+  it("ignores live evidence from before the canary started", async () => {
+    const seeded = await startCanary({ min_canary_age_s: 0, min_canary_requests: 100 }, "arm-window");
+    await postArms([{ policy_id: seeded.draftId, request_count: 500 }]);
+    // Restart the canary clock: the 500 requests are now older than the canary.
+    const db = openDb(sqlitePath);
+    try {
+      db.prepare(
+        "UPDATE project_live_state SET canary_started_at = ? WHERE project_id = ?",
+      ).run(new Date(Date.now() + 1000).toISOString(), projectId);
+    } finally {
+      db.close();
+    }
+    const cycle = await runCycle("cycle-arm-window");
+    assert.equal(cycle.blocked_reason, "canary_stats_missing");
+  });
+
+  it("promotes a healthy canary with enough of its own traffic", async () => {
+    const seeded = await startCanary({ min_canary_requests: 200 }, "arm-promote");
+    ageCanary(3600);
+    await postArms([
+      {
+        policy_id: seeded.lastFullId,
+        request_count: 4000,
+        fallback_count: 40,
+        latency_ms_sum: 4000 * 500,
+        latency_count: 4000,
+        quality_checked: 4000,
+        quality_failed: 40,
+      },
+      {
+        policy_id: seeded.draftId,
+        request_count: 250,
+        fallback_count: 2,
+        latency_ms_sum: 250 * 450,
+        latency_count: 250,
+        quality_checked: 250,
+        quality_failed: 2,
+      },
+    ]);
+    const cycle = await runCycle("cycle-arm-promote");
+    assert.equal(cycle.pending_action, "auto_full");
+    const doc = await getPolicy();
+    assert.equal(doc.last_full?.policy_id, seeded.draftId);
+    assert.equal(doc.canary, null);
+  });
+
+  it("an unhealthy canary is not promoted when auto rollback is off", async () => {
+    const seeded = await startCanary(
+      { auto_rollback: false, min_canary_age_s: 0, min_canary_requests: 10 },
+      "arm-no-rollback",
+    );
+    await postArms([{ policy_id: seeded.draftId, request_count: 100, error_count: 20 }]);
+    const cycle = await runCycle("cycle-arm-no-rollback");
+    assert.equal(cycle.blocked_reason, "error_rate_high");
+    assert.equal((await getPolicy()).canary?.policy_id, seeded.draftId);
+  });
+
+  it("live report shows canary and full policy evidence", async () => {
+    const seeded = await startCanary({}, "arm-report");
+    await postArms([
+      { policy_id: seeded.lastFullId, request_count: 30 },
+      { policy_id: seeded.draftId, request_count: 3 },
+    ]);
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/tools/get_live_report",
+      headers: authHeaders(),
+      payload: { project_id: projectId },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    const body = res.json() as {
+      canary_evidence: {
+        canary: { policy_id: string; request_count: number };
+        control: { request_count: number } | null;
+      } | null;
+    };
+    assert.equal(body.canary_evidence?.canary.policy_id, seeded.draftId);
+    assert.equal(body.canary_evidence?.canary.request_count, 3);
+    assert.equal(body.canary_evidence?.control?.request_count, 30);
+  });
 });

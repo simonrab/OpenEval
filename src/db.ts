@@ -108,6 +108,14 @@ export function migrate(db: Database.Database): void {
     "INTEGER NOT NULL DEFAULT 0",
   );
   addColumnIfMissing(db, "samples", "dropped_at", "TEXT");
+  addColumnIfMissing(db, "project_live_state", "canary_started_at", "TEXT");
+  addColumnIfMissing(db, "live_automation", "max_error_rate", "REAL");
+  addColumnIfMissing(db, "live_automation", "max_quality_fail_rate", "REAL");
+  addColumnIfMissing(db, "live_automation", "max_rate_increase", "REAL");
+  addColumnIfMissing(db, "live_automation", "max_latency_increase", "REAL");
+  addColumnIfMissing(db, "live_automation", "max_cost_increase", "REAL");
+  addColumnIfMissing(db, "live_automation", "min_rollback_requests", "INTEGER");
+  addColumnIfMissing(db, "live_automation", "stats_window_s", "INTEGER");
   addColumnIfMissing(db, "jobs", "registry_version", "TEXT");
   addColumnIfMissing(db, "jobs", "archetype_plan", "TEXT");
   addColumnIfMissing(db, "evals", "archetype_id", "TEXT");

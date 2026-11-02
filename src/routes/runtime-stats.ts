@@ -5,6 +5,30 @@ import { agentError, projectNotFoundError } from "../errors.js";
 import { projectExists } from "../keys.js";
 import { upsertLiveStats } from "../policy.js";
 import { ErrorCode } from "../tools/types.js";
+import { armHasData, recordArmEvent } from "../live/arms.js";
+
+const count = z.number().int().min(0);
+const total = z.number().min(0).finite();
+
+/** Change since the SDK's last report, for one policy. */
+const armSchema = z
+  .object({
+    policy_id: z.string().min(1),
+    request_count: count,
+    fallback_count: count,
+    error_count: count,
+    pii_blocked_miss_count: count,
+    latency_ms_sum: total,
+    latency_count: count,
+    cost_usd_sum: total,
+    cost_count: count,
+    quality_checked: count,
+    quality_failed: count,
+  })
+  .strict()
+  .refine((a) => a.quality_failed <= a.quality_checked, {
+    message: "quality_failed is more than quality_checked",
+  });
 
 const statsBodySchema = z
   .object({
@@ -20,6 +44,7 @@ const statsBodySchema = z
     candidate_id: z.string().min(1).nullable().optional(),
     feature_id: z.string().min(1).nullable().optional(),
     captured_at: z.string().min(1).optional(),
+    arms: z.array(armSchema).max(16).optional(),
   })
   .strict();
 
@@ -67,6 +92,14 @@ export async function registerRuntimeStats(
       body.pii_blocked_count ?? 0,
       body.captured_at ?? new Date().toISOString(),
     );
+    // Arm rows use server time so the decision cycle window is not skewed by
+    // app server clocks.
+    const now = new Date().toISOString();
+    for (const arm of body.arms ?? []) {
+      if (armHasData(arm)) {
+        recordArmEvent(db, body.project_id, arm, now);
+      }
+    }
     return { ok: true };
   });
 }

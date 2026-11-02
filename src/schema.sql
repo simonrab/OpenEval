@@ -306,6 +306,30 @@ CREATE TABLE IF NOT EXISTS runtime_stats_events (
   FOREIGN KEY (project_id) REFERENCES projects(id)
 );
 
+-- Live guard: per-policy live evidence. Each row is a delta, not a running
+-- total, so many app servers can report and the rows add up. captured_at is
+-- server time, so the decision cycle can read a recent window.
+CREATE TABLE IF NOT EXISTS runtime_arm_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  policy_id TEXT NOT NULL,
+  request_count INTEGER NOT NULL,
+  fallback_count INTEGER NOT NULL,
+  error_count INTEGER NOT NULL,
+  pii_blocked_miss_count INTEGER NOT NULL,
+  latency_ms_sum REAL NOT NULL,
+  latency_count INTEGER NOT NULL,
+  cost_usd_sum REAL NOT NULL,
+  cost_count INTEGER NOT NULL,
+  quality_checked INTEGER NOT NULL,
+  quality_failed INTEGER NOT NULL,
+  captured_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES projects(id)
+);
+
+CREATE INDEX IF NOT EXISTS runtime_arm_events_policy
+  ON runtime_arm_events (project_id, policy_id, captured_at);
+
 -- V2: human-approved automation rules. One current row per project.
 CREATE TABLE IF NOT EXISTS live_automation (
   project_id TEXT PRIMARY KEY,

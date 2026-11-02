@@ -235,6 +235,47 @@ describe("compile_policy (R1)", () => {
     assert.equal(stored.ste_id, seeded.evalSetId);
   });
 
+  it("puts trusted output contract and safety checks in the policy as live checks", async () => {
+    const seeded = seedRecommendation();
+    const db = new Database(sqlitePath);
+    try {
+      const add = (id: string, archetype: string, check: unknown, status = "trusted") => {
+        db.prepare(
+          `INSERT INTO evals (id, title, score_how, status, program_check, input_truncated,
+                              archetype_id, created_at)
+           VALUES (?, 't', 'code', ?, ?, 'in', ?, ?)`,
+        ).run(id, status, JSON.stringify(check), archetype, new Date().toISOString());
+        db.prepare(
+          `INSERT INTO eval_set_members (eval_set_id, eval_id) VALUES (?, ?)`,
+        ).run(seeded.evalSetId, id);
+      };
+      add("ev_live_json", "output_contract", { kind: "json_valid", expected: true });
+      add("ev_live_safe", "safety_policy", { kind: "must_not_contain", expected: "SSN" });
+      add("ev_live_one", "extraction_transform", { kind: "json_schema", expected: {} });
+      add("ev_live_draft", "output_contract", { kind: "length_range", expected: { max: 9 } }, "draft");
+    } finally {
+      db.close();
+    }
+    const res = await compile({
+      project_id: projectId,
+      recommendation_id: seeded.recId,
+      eval_set_id: seeded.evalSetId,
+      idempotency_key: "compile-live-checks",
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    const body = res.json() as { policy_id: string; live_check_count: number };
+    assert.equal(body.live_check_count, 2);
+    const ro = new Database(sqlitePath, { readonly: true });
+    const row = ro
+      .prepare(`SELECT body_json FROM policies WHERE id = ?`)
+      .get(body.policy_id) as { body_json: string };
+    ro.close();
+    assert.deepEqual((JSON.parse(row.body_json) as { live_checks: unknown }).live_checks, [
+      { kind: "json_valid", expected: true },
+      { kind: "must_not_contain", expected: "SSN" },
+    ]);
+  });
+
   it("rejects an extra input field", async () => {
     const seeded = seedRecommendation();
     const res = await compile({
