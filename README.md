@@ -8,6 +8,10 @@ OpenEval makes draft evals from that evidence.
 It runs trusted evals against models.
 It recommends one named model for the app.
 
+![OpenEval runs trusted evals on four models and recommends the cheapest one that passes them all](.github/assets/openeval-demo.gif)
+
+_An illustration. The models, scores, costs and times are examples, not real results._
+
 OpenEval can also serve a live signed policy.
 The app uses that policy through the SDK or optional proxy.
 A deployed control job can update that policy in guarded mode.
